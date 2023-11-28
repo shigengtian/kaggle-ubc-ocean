@@ -1,0 +1,338 @@
+import os
+import pandas as pd
+import numpy as np
+import random
+import shutil
+import cv2
+
+import sklearn
+import matplotlib.pyplot as plt
+import yaml
+
+import torch
+import torch.nn as nn
+from torch.nn import Parameter
+import torch.nn.functional as F
+from torch.optim import Adam, SGD, AdamW
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.checkpoint import checkpoint
+import torchvision.transforms as transforms
+import timm
+
+import joblib
+from pathlib import Path
+from glob import glob
+from tqdm import tqdm
+from sklearn.model_selection import (
+    KFold,
+    StratifiedKFold,
+    GroupKFold,
+    StratifiedGroupKFold,
+)
+from sklearn.metrics import roc_auc_score
+from sklearn.utils.class_weight import compute_class_weight
+from sklearn.preprocessing import LabelEncoder
+
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+from utils import seed_everything, AverageMeter, get_logger
+
+import segmentation_models_pytorch as smp
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class CFG:
+    wandb = True
+    competition = "rsna-atd"
+    _wandb_kernel = "shigengtian/rsna-atd-baseline"
+
+    exp_name = "baseline-v1"
+
+    model_name = "tf_efficientnet_b0_ns"
+
+    # seed for data-split, layer init, augs
+    seed = 42
+
+    # number of folds for data-split
+    folds = 5
+
+    # which folds to train
+    selected_folds = [0, 1, 2, 3, 4]
+
+    # size of the image
+    img_size = 512
+
+    # batch_size and epochs
+    batch_size = 16
+    epochs = 30
+    num_workers = 32
+
+    lr = 1e-4
+    weight_decay = 1e-6
+    # target column
+    target_cols = ["liver", "spleen", "LK", "RK", "bowel"]
+    num_classes = len(target_cols)
+
+
+class UBCDataset(Dataset):
+    def __init__(self, df, transforms=None):
+        self.df = df
+        self.file_names = df["file_path"].values
+        self.labels = df["label"].values
+        self.transforms = transforms
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, index):
+        img_path = self.file_names[index]
+        img = cv2.imread(img_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        label = self.labels[index]
+
+        if self.transforms:
+            img = self.transforms(image=img)["image"]
+
+        return {"image": img, "label": torch.tensor(label, dtype=torch.long)}
+
+
+def get_transforms(data):
+    if data == "train":
+        return (
+            A.Compose(
+                [
+                    A.Resize(CFG.img_size, CFG.img_size),
+                    A.ShiftScaleRotate(
+                        shift_limit=0.1, scale_limit=0.15, rotate_limit=60, p=0.5
+                    ),
+                    A.HueSaturationValue(
+                        hue_shift_limit=0.2,
+                        sat_shift_limit=0.2,
+                        val_shift_limit=0.2,
+                        p=0.5,
+                    ),
+                    A.RandomBrightnessContrast(
+                        brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5
+                    ),
+                    A.Normalize(
+                        mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225],
+                        max_pixel_value=255.0,
+                        p=1.0,
+                    ),
+                    ToTensorV2(),
+                ],
+                p=1.0,
+            ),
+        )
+
+    elif data == "valid":
+        return A.Compose(
+            [
+                A.Resize(CFG.img_size, CFG.img_size),
+                A.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                    max_pixel_value=255.0,
+                    p=1.0,
+                ),
+                ToTensorV2(),
+            ],
+            p=1.0,
+        )
+
+
+def criterion(outputs, labels):
+    return nn.CrossEntropyLoss()(outputs, labels)
+
+
+def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
+    losses = AverageMeter()
+    model.train()
+    scaler = torch.cuda.amp.GradScaler(enabled=True)
+
+    bar = tqdm(total=len(train_loader))
+    bar.set_description(f"TRAIN Fold: {fold}, Epoch: {epoch + 1}")
+
+    for step, data in enumerate(train_loader):
+        images = data["image"].to(device)
+        labels = data["label"].to(device)
+        batch_size = labels.size(0)
+
+        with torch.cuda.amp.autocast(enabled=True):
+            y_preds = model(images)
+            loss = criterion(y_preds, labels)
+
+        losses.update(loss.item(), batch_size)
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+        optimizer.zero_grad()
+        scheduler.step()
+
+        del images, labels, y_preds
+        torch.cuda.empty_cache()
+        bar.update()
+
+    return losses.avg
+
+
+def valid_fn(valid_loader, model, epoch, criterion, fold):
+    losses = AverageMeter()
+    model.eval()
+    # preds = []
+    bar = tqdm(total=len(valid_loader))
+    bar.set_description(f"Valid Fold: {fold}, Epoch: {epoch + 1}")
+
+    for step, data in enumerate(valid_loader):
+        images = data["image"].to(device)
+        labels = data["label"].to(device)
+        batch_size = labels.size(0)
+
+        y_preds = model(images)
+        loss = criterion(y_preds, labels)
+        losses.update(loss.item(), batch_size)
+        # preds.append(y_preds.to('cpu').detach().numpy())
+        del images, labels, y_preds
+        torch.cuda.empty_cache()
+        bar.update()
+
+    #  np.concatenate(preds)
+    return losses.avg
+
+
+class GeM(nn.Module):
+    def __init__(self, p=3, eps=1e-6):
+        super(GeM, self).__init__()
+        self.p = nn.Parameter(torch.ones(1) * p)
+        self.eps = eps
+
+    def forward(self, x):
+        return self.gem(x, p=self.p, eps=self.eps)
+
+    def gem(self, x, p=3, eps=1e-6):
+        return F.avg_pool2d(x.clamp(min=eps).pow(p), (x.size(-2), x.size(-1))).pow(
+            1.0 / p
+        )
+
+    def __repr__(self):
+        return (
+            self.__class__.__name__
+            + "("
+            + "p="
+            + "{:.4f}".format(self.p.data.tolist()[0])
+            + ", "
+            + "eps="
+            + str(self.eps)
+            + ")"
+        )
+
+
+class UBCModel(nn.Module):
+    def __init__(self, model_name, num_classes, pretrained=False, checkpoint_path=None):
+        super(UBCModel, self).__init__()
+        self.model = timm.create_model(model_name, pretrained=pretrained)
+
+        in_features = self.model.classifier.in_features
+        self.model.classifier = nn.Identity()
+        self.model.global_pool = nn.Identity()
+        self.pooling = GeM()
+        self.linear = nn.Linear(in_features, num_classes)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, images):
+        features = self.model(images)
+        pooled_features = self.pooling(features).flatten(1)
+        output = self.linear(pooled_features)
+        return output
+
+
+def train_loop(folds, fold):
+    LOGGER.info(f"========== fold: {fold} training ==========")
+
+    train_folds = folds[folds["fold"] != fold].reset_index(drop=True)
+    valid_folds = folds[folds["fold"] == fold].reset_index(drop=True)
+
+    train_dataset = UBCDataset(train_folds, transforms=get_transforms("train"))
+    valid_dataset = UBCDataset(valid_folds, transforms=get_transforms("valid"))
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=CFG.batch_size,
+        shuffle=True,
+        num_workers=CFG.num_workers,
+        pin_memory=True,
+        drop_last=True,
+    )
+
+    valid_loader = DataLoader(
+        valid_dataset,
+        batch_size=CFG.batch_size,
+        shuffle=False,
+        num_workers=CFG.num_workers,
+        pin_memory=True,
+        drop_last=False,
+    )
+
+    model = UBCModel(CFG.model_name, CFG.num_classes, pretrained=True)
+    model.to(device)
+
+    optimizer = AdamW(
+        model.parameters(), lr=CFG.lr, weight_decay=CFG.weight_decay, amsgrad=False
+    )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, eta_min=1e-6, T_max=500
+    )
+
+    best_loss = np.inf
+    for epoch in range(CFG.epochs):
+        train_loss = train_fn(
+            train_loader, model, optimizer, epoch, scheduler, criterion, fold
+        )
+
+        print(f"Epoch {epoch + 1} | Train Loss: {train_loss:.4f}")
+        valid_loss = valid_fn(valid_loader, model, epoch, criterion, fold)
+
+        LOGGER.info(f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f}")
+
+        if valid_loss < best_loss:
+            best_loss = valid_loss
+            LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
+            torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+
+
+if __name__ == "__main__":
+    seed_everything()
+    output_path = f"{CFG.exp_name}"
+    os.makedirs(output_path, exist_ok=True)
+    LOGGER = get_logger(f"{output_path}/train")
+
+    data_dir = Path("dataset")
+    thumbnails_dir = Path(data_dir / "train_thumbnails")
+    train_images = sorted(glob(str(thumbnails_dir / "*.png")))
+
+    def get_train_file_path(image_id):
+        return str(thumbnails_dir / f"{image_id}_thumbnail.png")
+
+    train_df = pd.read_csv(data_dir / "train.csv")
+    train_df["file_path"] = train_df["image_id"].apply(get_train_file_path)
+    train_df = train_df[train_df["file_path"].isin(train_images)].reset_index(drop=True)
+
+    encoder = LabelEncoder()
+    train_df["label"] = encoder.fit_transform(train_df["label"])
+
+    with open("dataset/label_encoder.pkl", "wb") as fp:
+        joblib.dump(encoder, fp)
+
+    skf = StratifiedKFold(n_splits=CFG.folds)
+
+    for fold, (_, val_) in enumerate(skf.split(X=train_df, y=train_df.label)):
+        train_df.loc[val_, "fold"] = int(fold)
+
+    for fold in CFG.selected_folds:
+        LOGGER.info(f"Fold: {fold}")
+        train_loop(train_df, fold)
+        break
