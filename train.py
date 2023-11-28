@@ -100,32 +100,36 @@ class UBCDataset(Dataset):
 
 def get_transforms(data):
     if data == "train":
-        return (
-            A.Compose(
-                [
-                    A.Resize(CFG.img_size, CFG.img_size),
-                    A.ShiftScaleRotate(
-                        shift_limit=0.1, scale_limit=0.15, rotate_limit=60, p=0.5
-                    ),
-                    A.HueSaturationValue(
-                        hue_shift_limit=0.2,
-                        sat_shift_limit=0.2,
-                        val_shift_limit=0.2,
-                        p=0.5,
-                    ),
-                    A.RandomBrightnessContrast(
-                        brightness_limit=(-0.1, 0.1), contrast_limit=(-0.1, 0.1), p=0.5
-                    ),
-                    A.Normalize(
-                        mean=[0.485, 0.456, 0.406],
-                        std=[0.229, 0.224, 0.225],
-                        max_pixel_value=255.0,
-                        p=1.0,
-                    ),
-                    ToTensorV2(),
-                ],
-                p=1.0,
-            ),
+        return A.Compose(
+            [
+                A.Resize(CFG.img_size, CFG.img_size, interpolation=cv2.INTER_NEAREST),
+                A.HorizontalFlip(p=0.5),
+                A.VerticalFlip(p=0.5),
+                A.ShiftScaleRotate(
+                    shift_limit=0.0625, scale_limit=0.05, rotate_limit=10, p=0.5
+                ),
+                A.OneOf(
+                    [
+                        A.GridDistortion(num_steps=5, distort_limit=0.05, p=1.0),
+                        A.OpticalDistortion(
+                            distort_limit=0.05, shift_limit=0.05, p=1.0
+                        ),
+                        A.ElasticTransform(alpha=1, sigma=50, alpha_affine=50, p=1.0),
+                    ],
+                    p=0.25,
+                ),
+                A.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                    max_pixel_value=255.0,
+                    p=1.0,
+                ),
+                ToTensorV2()
+                # CoarseDropout(max_holes=8, max_height=CFG.img_size[0]//20, max_width=CFG.img_size[1]//20,
+                #                 min_holes=5, fill_value=0, mask_fill_value=0, p=0.5),
+            ],
+            p=1.0,
+            is_check_shapes=False,
         )
 
     elif data == "valid":
@@ -171,8 +175,6 @@ def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
         scaler.update()
         optimizer.zero_grad()
         scheduler.step()
-
-        del images, labels, y_preds
         torch.cuda.empty_cache()
         bar.update()
 
@@ -182,7 +184,6 @@ def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
 def valid_fn(valid_loader, model, epoch, criterion, fold):
     losses = AverageMeter()
     model.eval()
-    # preds = []
     bar = tqdm(total=len(valid_loader))
     bar.set_description(f"Valid Fold: {fold}, Epoch: {epoch + 1}")
 
