@@ -45,10 +45,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class CFG:
     wandb = True
-    competition = "rsna-atd"
-    _wandb_kernel = "shigengtian/rsna-atd-baseline"
+    competition = "ubc-ocean"
+    _wandb_kernel = "shigengtian/ubc-ocean"
 
-    exp_name = "baseline-v1"
+    exp_name = "exp-01"
 
     model_name = "tf_efficientnet_b0_ns"
 
@@ -72,7 +72,7 @@ class CFG:
     lr = 1e-4
     weight_decay = 1e-6
     # target column
-    target_cols = ["liver", "spleen", "LK", "RK", "bowel"]
+    target_cols = ["CC", "EC", "HGSC", "LGSC", "MC"]
     num_classes = len(target_cols)
 
 
@@ -92,10 +92,12 @@ class UBCDataset(Dataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         label = self.labels[index]
 
+        label = np.eye(CFG.num_classes)[label]
+
         if self.transforms:
             img = self.transforms(image=img)["image"]
 
-        return {"image": img, "label": torch.tensor(label, dtype=torch.long)}
+        return {"image": img, "label": torch.tensor(label, dtype=torch.float32)}
 
 
 def get_transforms(data):
@@ -125,8 +127,6 @@ def get_transforms(data):
                     p=1.0,
                 ),
                 ToTensorV2()
-                # CoarseDropout(max_holes=8, max_height=CFG.img_size[0]//20, max_width=CFG.img_size[1]//20,
-                #                 min_holes=5, fill_value=0, mask_fill_value=0, p=0.5),
             ],
             p=1.0,
             is_check_shapes=False,
@@ -149,7 +149,7 @@ def get_transforms(data):
 
 
 def criterion(outputs, labels):
-    return nn.CrossEntropyLoss()(outputs, labels)
+    return nn.BCEWithLogitsLoss()(outputs, labels)
 
 
 def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
@@ -187,6 +187,8 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
     bar = tqdm(total=len(valid_loader))
     bar.set_description(f"Valid Fold: {fold}, Epoch: {epoch + 1}")
 
+    preds = []
+    label = []
     for step, data in enumerate(valid_loader):
         images = data["image"].to(device)
         labels = data["label"].to(device)
@@ -195,13 +197,28 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
         y_preds = model(images)
         loss = criterion(y_preds, labels)
         losses.update(loss.item(), batch_size)
-        # preds.append(y_preds.to('cpu').detach().numpy())
-        del images, labels, y_preds
+        
+        # preds.append(y_preds.detach().cpu().numpy())
+        # _, predicted = torch.max(model.softmax(y_preds), 1)
+        y_preds = torch.sigmoid(y_preds).detach().cpu().numpy()
+        preds.append(y_preds)
+        
+        
+        # preds.append(predicted.to("cpu").numpy())
+        label.append(labels.to("cpu").numpy())
+        
         torch.cuda.empty_cache()
         bar.update()
-
-    #  np.concatenate(preds)
-    return losses.avg
+        
+    preds = np.concatenate(preds)
+    label = np.concatenate(label)
+    print(preds.shape, label.shape)
+    
+    # acc = torch.sum( predicted == labels )
+    # acc = acc/len(labels)
+    # print("acc: ", acc)
+    acc = 0
+    return losses.avg, acc
 
 
 class GeM(nn.Module):
@@ -241,7 +258,6 @@ class UBCModel(nn.Module):
         self.model.global_pool = nn.Identity()
         self.pooling = GeM()
         self.linear = nn.Linear(in_features, num_classes)
-        self.softmax = nn.Softmax(dim=1)
 
     def forward(self, images):
         features = self.model(images)
@@ -288,21 +304,26 @@ def train_loop(folds, fold):
         optimizer, eta_min=1e-6, T_max=500
     )
 
-    best_loss = np.inf
+
+    best_acc = 0.0
     for epoch in range(CFG.epochs):
         train_loss = train_fn(
             train_loader, model, optimizer, epoch, scheduler, criterion, fold
         )
+        
+        valid_loss, valid_acc = valid_fn(valid_loader, model, epoch, criterion, fold)
 
-        print(f"Epoch {epoch + 1} | Train Loss: {train_loss:.4f}")
-        valid_loss = valid_fn(valid_loader, model, epoch, criterion, fold)
+        LOGGER.info(f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f} | acc:{valid_acc:.4f}")
 
-        LOGGER.info(f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f}")
 
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
+        if valid_acc > best_acc:
+            best_acc = valid_acc
+            LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
             torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+        
+    LOGGER.info(f"best acc: {best_acc:.4f}")
+    LOGGER.info(f"========== fold: {fold} training end ==========")
+
 
 
 if __name__ == "__main__":
@@ -324,7 +345,7 @@ if __name__ == "__main__":
 
     encoder = LabelEncoder()
     train_df["label"] = encoder.fit_transform(train_df["label"])
-
+    print(train_df["label"].value_counts())
     with open("dataset/label_encoder.pkl", "wb") as fp:
         joblib.dump(encoder, fp)
 
