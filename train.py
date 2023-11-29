@@ -29,7 +29,7 @@ from sklearn.model_selection import (
     GroupKFold,
     StratifiedGroupKFold,
 )
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, f1_score
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.preprocessing import LabelEncoder
 
@@ -126,7 +126,7 @@ def get_transforms(data):
                     max_pixel_value=255.0,
                     p=1.0,
                 ),
-                ToTensorV2()
+                ToTensorV2(),
             ],
             p=1.0,
             is_check_shapes=False,
@@ -197,23 +197,25 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
         y_preds = model(images)
         loss = criterion(y_preds, labels)
         losses.update(loss.item(), batch_size)
-        
+
         # preds.append(y_preds.detach().cpu().numpy())
         # _, predicted = torch.max(model.softmax(y_preds), 1)
         y_preds = torch.sigmoid(y_preds).detach().cpu().numpy()
         preds.append(y_preds)
-        
-        
+
         # preds.append(predicted.to("cpu").numpy())
         label.append(labels.to("cpu").numpy())
-        
+
         torch.cuda.empty_cache()
         bar.update()
-        
+
     preds = np.concatenate(preds)
     label = np.concatenate(label)
     print(preds.shape, label.shape)
-    
+
+    # f1 = f1_score(label, preds, average='micro')
+    # print(f1)
+
     # acc = torch.sum( predicted == labels )
     # acc = acc/len(labels)
     # print("acc: ", acc)
@@ -304,26 +306,31 @@ def train_loop(folds, fold):
         optimizer, eta_min=1e-6, T_max=500
     )
 
-
-    best_acc = 0.0
+    best_acc = -1.0
+    best_loss = np.inf
     for epoch in range(CFG.epochs):
         train_loss = train_fn(
             train_loader, model, optimizer, epoch, scheduler, criterion, fold
         )
-        
+
         valid_loss, valid_acc = valid_fn(valid_loader, model, epoch, criterion, fold)
 
-        LOGGER.info(f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f} | acc:{valid_acc:.4f}")
-
-
-        if valid_acc > best_acc:
-            best_acc = valid_acc
-            LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
-            torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+        LOGGER.info(
+            f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f} | acc:{valid_acc:.4f}"
+        )
+        # torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+        # if valid_acc > best_acc:
+        #     best_acc = valid_acc
+        #     LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
+        #     torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
         
+        if valid_loss < best_loss:
+            best_loss = valid_loss
+            LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
+            torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+
     LOGGER.info(f"best acc: {best_acc:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")
-
 
 
 if __name__ == "__main__":
