@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from pathlib import Path
-
+import pyvips
 
 # def extract_image_tiles(
 #     p_img, folder, size: int = 2048, scale: float = 0.5,
@@ -55,12 +55,34 @@ from pathlib import Path
 
 # !ls -lh /kaggle/temp/images
 
+def mask2label(mask: np.ndarray):
+    """
+    modify the color mask to label mask in place.
+
+    Args:
+        mask: (H, W), np.uint8
+
+    Returns:
+        mask: (H, W), np.uint8, value: {'background': 0, 'tumor': 1, 'stroma': 2, 'necrosis': 3}
+    """
+    bg = (mask.sum(axis=-1) == 0)
+    mask = mask.argmax(axis=-1).astype(np.uint8) + 1
+    mask[bg] = 0
+
+    return mask
+
+
+
 if __name__ == '__main__':
     data_dir = Path('dataset')
     train_df = pd.read_csv(data_dir / 'train.csv')
     test_df = pd.read_csv(data_dir / 'test.csv')
     
     mask_files = sorted(list((data_dir / 'ubc-ovarian-cancer-competition-supplemental-masks').glob('*.png')))
-    # print(mask_files)
+    print(mask_files)
+    mask = pyvips.Image.new_from_file(mask_files[0], access='sequential')
+    print(type(mask))
+    # print(mask.shape)
+    # mask = mask2label(mask)
     # print(train_df.head())
     # print(test_df.head())

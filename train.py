@@ -50,7 +50,7 @@ class CFG:
 
     exp_name = "exp-01"
 
-    model_name = "tf_efficientnet_b1_ns"
+    model_name = "tf_efficientnetv2_s_in21ft1k"
 
     # seed for data-split, layer init, augs
     seed = 42
@@ -65,7 +65,7 @@ class CFG:
     img_size = 512
 
     # batch_size and epochs
-    batch_size = 16
+    batch_size = 8
     epochs = 30
     num_workers = 32
 
