@@ -29,7 +29,7 @@ from sklearn.model_selection import (
     GroupKFold,
     StratifiedGroupKFold,
 )
-from sklearn.metrics import roc_auc_score, f1_score
+from sklearn.metrics import roc_auc_score, f1_score, balanced_accuracy_score
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.preprocessing import LabelEncoder
 
@@ -50,7 +50,7 @@ class CFG:
 
     exp_name = "exp-01"
 
-    model_name = "tf_efficientnet_b0_ns"
+    model_name = "tf_efficientnet_b1_ns"
 
     # seed for data-split, layer init, augs
     seed = 42
@@ -201,12 +201,10 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
         loss = criterion(y_preds, labels)
         losses.update(loss.item(), batch_size)
 
-        # preds.append(y_preds.detach().cpu().numpy())
-        # _, predicted = torch.max(model.softmax(y_preds), 1)
         y_preds = torch.sigmoid(y_preds).detach().cpu().numpy()
         preds.append(y_preds)
 
-        # preds.append(predicted.to("cpu").numpy())
+
         label.append(labels.to("cpu").numpy())
 
         torch.cuda.empty_cache()
@@ -214,16 +212,9 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
 
     preds = np.concatenate(preds)
     label = np.concatenate(label)
-    print(preds.shape, label.shape)
 
-    # f1 = f1_score(label, preds, average='micro')
-    # print(f1)
-
-    # acc = torch.sum( predicted == labels )
-    # acc = acc/len(labels)
-    # print("acc: ", acc)
-    acc = 0
-    return losses.avg, acc
+    score = balanced_accuracy_score(label.argmax(axis=1), preds.argmax(axis=1))
+    return losses.avg, score
 
 
 class GeM(nn.Module):
@@ -321,16 +312,16 @@ def train_loop(folds, fold):
         LOGGER.info(
             f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f} | acc:{valid_acc:.4f}"
         )
-        # torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
-        # if valid_acc > best_acc:
-        #     best_acc = valid_acc
-        #     LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
-        #     torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
         
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
+        if valid_acc > best_acc:
+            best_acc = valid_acc
+            LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
             torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+        
+        # if valid_loss < best_loss:
+        #     best_loss = valid_loss
+        #     LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
+        #     torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
 
     LOGGER.info(f"best acc: {best_acc:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")
