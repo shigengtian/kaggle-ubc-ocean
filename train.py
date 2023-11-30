@@ -101,6 +101,9 @@ class UBCDataset(Dataset):
 
 
 def get_transforms(data):
+    # img_color_mean = [0.8721593659261734, 0.7799686061900686, 0.8644588534918227]
+    # img_color_std = [0.08258995918115268, 0.10991684444009092, 0.06839816226731532]
+
     if data == "train":
         return A.Compose(
             [
