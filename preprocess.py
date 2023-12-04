@@ -1,7 +1,11 @@
+import os
+os.environ["OPENCV_IO_MAX_IMAGE_PIXELS"] = pow(2, 40).__str__()
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import pyvips
+import cv2
+from glob import glob
 
 # def extract_image_tiles(
 #     p_img, folder, size: int = 2048, scale: float = 0.5,
@@ -39,22 +43,8 @@ import pyvips
 #         k += 1
 #     return files, idxs
 
-    
-    
-# tiles_img, idxs = extract_image_tiles(
-#     os.path.join(DATASET_IMAGES, "1020.png"),
-#     "/kaggle/temp/images", size=1024, scale=0.5,
-# )
-# tiles_seg, _ = extract_image_tiles(
-#     os.path.join(DATASET_MASKS, "1020.png"),
-#     "/kaggle/temp/annotations", size=1024, scale=0.5,
-#     drop_thr=None, inds=idxs
-# )
-# print(f"tiles_img={len(tiles_img)}")
-# print(f"tiles_seg={len(tiles_seg)}")
 
-# !ls -lh /kaggle/temp/images
-
+    
 def mask2label(mask: np.ndarray):
     """
     modify the color mask to label mask in place.
@@ -78,11 +68,29 @@ if __name__ == '__main__':
     train_df = pd.read_csv(data_dir / 'train.csv')
     test_df = pd.read_csv(data_dir / 'test.csv')
     
-    mask_files = sorted(list((data_dir / 'ubc-ovarian-cancer-competition-supplemental-masks').glob('*.png')))
-    print(mask_files)
-    mask = pyvips.Image.new_from_file(mask_files[0], access='sequential')
-    print(type(mask))
+    # mask_files = sorted(list((data_dir / 'ubc-ovarian-cancer-competition-supplemental-masks').glob('*.png')))
+    # mask = cv2.imread(str(mask_files[0]))
     # print(mask.shape)
-    # mask = mask2label(mask)
-    # print(train_df.head())
-    # print(test_df.head())
+    # print(np.unique(mask))
+    
+    
+    thumbnails_dir = Path(data_dir / "train_thumbnails")
+    train_images = sorted(glob(str(thumbnails_dir / "*.png")))
+    print(len(train_images))
+    
+    
+    
+    # print(train_images[0])
+    
+    # img = cv2.imread(train_images[0])
+    # print(img.shape)
+
+    # for i, row in train_df.
+    
+#     mask = pyvips.Image.new_from_file(mask_files[0], access='sequential')
+#     numpy_array = np.ndarray(
+#     buffer=mask.write_to_memory(),
+#     dtype=np.uint8,
+#     shape=[mask.height, mask.width, mask.bands]
+# )
+#     print(numpy_array.shape)
