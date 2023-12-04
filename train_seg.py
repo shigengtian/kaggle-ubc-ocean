@@ -96,7 +96,7 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, index):
         image = cv2.imread(str(self.img_path[index]))
-        mask = np.load(str(self.mask_path[index]))
+        mask = np.load(str(self.mask_path[index]))/255.0
         mask = mask[:, :, np.newaxis]
 
         if self.transforms:
@@ -135,12 +135,12 @@ def get_transforms(data):
                     mask_fill_value=0,
                     p=0.5,
                 ),
-                A.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225],
-                    max_pixel_value=255.0,
-                    p=1.0,
-                ),
+                # A.Normalize(
+                #     mean=[0.485, 0.456, 0.406],
+                #     std=[0.229, 0.224, 0.225],
+                #     max_pixel_value=255.0,
+                #     p=1.0,
+                # ),
                 # ToTensorV2(),
             ],
             p=1.0,
@@ -151,23 +151,18 @@ def get_transforms(data):
         return A.Compose(
             [
                 A.Resize(CFG.img_size, CFG.img_size),
-                A.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225],
-                    max_pixel_value=255.0,
-                    p=1.0,
-                ),
+                # A.Normalize(
+                #     mean=[0.485, 0.456, 0.406],
+                #     std=[0.229, 0.224, 0.225],
+                #     max_pixel_value=255.0,
+                #     p=1.0,
+                # ),
                 # ToTensorV2(),
             ],
             p=1.0,
         )
 
-
-def criterion(outputs, labels):
-    return nn.BCEWithLogitsLoss()(outputs, labels)
-
-
-def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
+def train_fn(train_loader, model, optimizer, epoch, scheduler, fold):
     losses = AverageMeter()
     model.train()
     scaler = torch.cuda.amp.GradScaler(enabled=True)
@@ -196,7 +191,7 @@ def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
     return losses.avg
 
 
-def valid_fn(valid_loader, model, epoch, criterion, fold):
+def valid_fn(valid_loader, model, epoch, fold):
     losses = AverageMeter()
     model.eval()
     bar = tqdm(total=len(valid_loader))
@@ -212,11 +207,6 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
         y_preds = model(images)
         loss = criterion(y_preds, labels)
         losses.update(loss.item(), batch_size)
-
-        y_preds = torch.sigmoid(y_preds).detach().cpu().numpy()
-        preds.append(y_preds)
-
-        label.append(labels.to("cpu").numpy())
 
         torch.cuda.empty_cache()
         bar.update()
@@ -281,10 +271,10 @@ def train_loop(folds, fold):
     )
 
     model = smp.Unet(
-        encoder_name=CFG.model_name,  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-        encoder_weights="imagenet",  # use `imagenet` pre-trained weights for encoder initialization
-        in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-        classes=1,  # model output channels (number of classes in your dataset)
+        encoder_name=CFG.model_name,
+        encoder_weights="imagenet",
+        in_channels=3,
+        classes=1,
         activation=None,
     )
 
@@ -298,25 +288,25 @@ def train_loop(folds, fold):
         optimizer, eta_min=1e-6, T_max=500
     )
 
-    best_acc = -1.0
+
     best_loss = np.inf
     for epoch in range(CFG.epochs):
         train_loss = train_fn(
-            train_loader, model, optimizer, epoch, scheduler, criterion, fold
+            train_loader, model, optimizer, epoch, scheduler, fold
         )
 
-        valid_loss, valid_acc = valid_fn(valid_loader, model, epoch, criterion, fold)
+        valid_loss = valid_fn(valid_loader, model, epoch, fold)
 
         LOGGER.info(
-            f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f} | acc:{valid_acc:.4f}"
+            f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f}"
         )
 
-        if valid_acc > best_acc:
-            best_acc = valid_acc
-            LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
+        if valid_loss < best_loss:
+            best_loss = valid_loss
+            LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
             torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
-
-    LOGGER.info(f"best acc: {best_acc:.4f}")
+      
+    LOGGER.info(f"best loss: {best_loss:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")
 
 
