@@ -126,8 +126,6 @@ def get_transforms():
     )
 
 
-
-
 def train_loop(folds, fold):
     LOGGER.info(f"========== fold: {fold} training ==========")
 
@@ -155,13 +153,13 @@ def train_loop(folds, fold):
     model.to(device)
     model.load_state_dict(torch.load(f"{output_path}/fold-{fold}.pth"))
     print("weights loaded")
-    
+
     for index, (images, label) in enumerate(valid_loader):
         images = images.to(device)
         label = label.to(device)
         with torch.no_grad():
             outputs = model(images)
-            
+
         probs = torch.sigmoid(outputs)
         probs = probs.detach().cpu().numpy()
 
@@ -169,13 +167,11 @@ def train_loop(folds, fold):
         threshold = 0.5  # You can adjust this threshold based on your task
         binary_masks = (probs > threshold).astype(int)
         cv2.imwrite("pred.png", binary_masks[1][0] * 255)
-        
+
         label = label.detach().cpu().numpy()
         cv2.imwrite("label.png", label[1][0] * 255)
-        
-        
-        break
 
+        break
 
 
 if __name__ == "__main__":
@@ -219,8 +215,7 @@ if __name__ == "__main__":
     train_seg = segmentation_nps_df.merge(
         train_thumbnails_files_df, on="image_id", how="left"
     )
-    
-    
+
     print(train_seg.head())
 
     kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)

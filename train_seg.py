@@ -56,10 +56,10 @@ class CFG:
     seed = 42
 
     # number of folds for data-split
-    folds = 5
+    folds = 10
 
     # which folds to train
-    selected_folds = [0, 1, 2, 3, 4]
+    selected_folds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
     # size of the image
     img_size = 512
@@ -96,7 +96,7 @@ class CustomDataset(Dataset):
 
     def __getitem__(self, index):
         image = cv2.imread(str(self.img_path[index]))
-        mask = np.load(str(self.mask_path[index]))/255.0
+        mask = np.load(str(self.mask_path[index])) / 255.0
         mask = mask[:, :, np.newaxis]
 
         if self.transforms:
@@ -161,6 +161,7 @@ def get_transforms(data):
             ],
             p=1.0,
         )
+
 
 def train_fn(train_loader, model, optimizer, epoch, scheduler, fold):
     losses = AverageMeter()
@@ -288,24 +289,19 @@ def train_loop(folds, fold):
         optimizer, eta_min=1e-6, T_max=500
     )
 
-
     best_loss = np.inf
     for epoch in range(CFG.epochs):
-        train_loss = train_fn(
-            train_loader, model, optimizer, epoch, scheduler, fold
-        )
+        train_loss = train_fn(train_loader, model, optimizer, epoch, scheduler, fold)
 
         valid_loss = valid_fn(valid_loader, model, epoch, fold)
 
-        LOGGER.info(
-            f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f}"
-        )
+        LOGGER.info(f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f}")
 
         if valid_loss < best_loss:
             best_loss = valid_loss
             LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
             torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
-      
+
     LOGGER.info(f"best loss: {best_loss:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")
 
