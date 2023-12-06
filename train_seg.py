@@ -97,17 +97,15 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         image = cv2.imread(str(self.img_path[index]))
         mask = np.load(str(self.mask_path[index])) / 255.0
-        mask = mask[:, :, np.newaxis]
+        # mask = mask[:, :, np.newaxis]
 
         if self.transforms:
             augmented = self.transforms(image=image, mask=mask)
             image = augmented["image"]
             mask = augmented["mask"]
-
-        image = np.transpose(image, (2, 0, 1))
-        image = image / 255.0
-        mask = np.transpose(mask, (2, 0, 1))
-        return torch.tensor(image).float(), torch.tensor(mask).float()
+            
+        mask = mask.unsqueeze(0)
+        return image, mask
 
 
 def get_transforms(data):
@@ -135,29 +133,29 @@ def get_transforms(data):
                     mask_fill_value=0,
                     p=0.5,
                 ),
-                # A.Normalize(
-                #     mean=[0.485, 0.456, 0.406],
-                #     std=[0.229, 0.224, 0.225],
-                #     max_pixel_value=255.0,
-                #     p=1.0,
-                # ),
-                # ToTensorV2(),
+                A.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                    max_pixel_value=255.0,
+                    p=1.0,
+                ),
+                ToTensorV2(),
             ],
             p=1.0,
-            is_check_shapes=False,
+            is_check_shapes=True,
         )
 
     elif data == "valid":
         return A.Compose(
             [
                 A.Resize(CFG.img_size, CFG.img_size),
-                # A.Normalize(
-                #     mean=[0.485, 0.456, 0.406],
-                #     std=[0.229, 0.224, 0.225],
-                #     max_pixel_value=255.0,
-                #     p=1.0,
-                # ),
-                # ToTensorV2(),
+                A.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                    max_pixel_value=255.0,
+                    p=1.0,
+                ),
+                ToTensorV2(),
             ],
             p=1.0,
         )
@@ -300,7 +298,7 @@ def train_loop(folds, fold):
         if valid_loss < best_loss:
             best_loss = valid_loss
             LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
-            torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+            torch.save(model.state_dict(), f"{output_path}/seg-fold-{fold}.pth")
 
     LOGGER.info(f"best loss: {best_loss:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")

@@ -222,9 +222,13 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
 
     preds = np.concatenate(preds)
     label = np.concatenate(label)
+    auc_score = roc_auc_score(label, preds)
+    # f1_score_micro = f1_score(
+    #     label.argmax(axis=1), preds.argmax(axis=1), average="micro"
+    # )
 
-    score = balanced_accuracy_score(label.argmax(axis=1), preds.argmax(axis=1))
-    return losses.avg, score
+    # score = balanced_accuracy_score(label.argmax(axis=1), preds.argmax(axis=1))
+    return losses.avg, auc_score
 
 
 class GeM(nn.Module):

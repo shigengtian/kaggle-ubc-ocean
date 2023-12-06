@@ -7,7 +7,7 @@ from pathlib import Path
 import pyvips
 import cv2
 from glob import glob
-
+from joblib import Parallel, delayed
 
 def extract_image_tiles(img_id, img_path, size=2048):
     img = cv2.imread(str(img_path))
@@ -69,30 +69,60 @@ def get_train_img_df(train_img_dir):
     return train_img_df
 
 
+
+def process_image(img_file, data_dir):
+    img = cv2.imread(str(img_file))
+    target_img = cv2.resize(img, (512, 512))
+    img_name = str(img_file).split("/")[-1]
+    target_path = data_dir / "train_images_512" / img_name
+    cv2.imwrite(str(target_path), target_img)
+    
+
 if __name__ == "__main__":
     data_dir = Path("dataset")
-    train_df = pd.read_csv(data_dir / "train.csv")
-    test_df = pd.read_csv(data_dir / "test.csv")
-    target_path = data_dir / "tile_512"
-    target_path.mkdir(parents=True, exist_ok=True)
-
-    data_dir = Path("dataset")
-    mask_dir = data_dir / "masks"
-    train_thumbnails_dir = data_dir / "train_thumbnails"
     train_img_dir = data_dir / "train_images"
+    img_files = list(train_img_dir.glob("*.png"))
+     
+     
+    # Specify the number of parallel processes (adjust as needed)
+    num_processes = 8
 
-    train_thumbnails_files_df = get_thumbnails_df(train_thumbnails_dir)
-    mask_files_df = get_mask_df(mask_dir)
-    train_img_df = get_train_img_df(train_img_dir)
-
-    train_df = mask_files_df.merge(train_thumbnails_files_df, on="image_id", how="left")
-    train_df = train_df.merge(train_img_df, on="image_id", how="left")
+    # Use joblib to parallelize image processing
+    Parallel(n_jobs=num_processes)(
+        delayed(process_image)(img_file, data_dir) for img_file in img_files
+    )
     
-    train_csv_df = pd.read_csv(data_dir / "train.csv", dtype=str)
     
-    train_df = train_df.merge(train_csv_df, on="image_id", how="left")
+    # for img_file in img_files:
+    #     img = cv2.imread(str(img_file))
+    #     target_img = cv2.resize(img, (512, 512))
+    #     img_name = str(img_file).split("/")[-1]
+    #     target_path = data_dir / "train_images_512" / img_name
+    #     cv2.imwrite(str(target_path), target_img)
+    #     # break
+     
+    # train_df = pd.read_csv(data_dir / "train.csv")
+    # test_df = pd.read_csv(data_dir / "test.csv")
+    # target_path = data_dir / "tile_512"
+    # target_path.mkdir(parents=True, exist_ok=True)
 
-    print(train_df[train_df["is_tma"] == "True"].head())
+    # data_dir = Path("dataset")
+    # mask_dir = data_dir / "masks"
+    # train_thumbnails_dir = data_dir / "train_thumbnails"
+    # train_img_dir = data_dir / "train_images"
+
+    # train_thumbnails_files_df = get_thumbnails_df(train_thumbnails_dir)
+    # mask_files_df = get_mask_df(mask_dir)
+    # train_img_df = get_train_img_df(train_img_dir)
+
+    # train_df = mask_files_df.merge(train_thumbnails_files_df, on="image_id", how="left")
+    # train_df = train_df.merge(train_img_df, on="image_id", how="left")
+    
+    # train_csv_df = pd.read_csv(data_dir / "train.csv", dtype=str)
+    
+    # train_df = train_df.merge(train_csv_df, on="image_id", how="left")
+
+    # print(train_df[train_df["is_tma"] == "True"].head())
     
     # print(train_csv_df.head())
     # print(len(train_df))
