@@ -345,21 +345,17 @@ if __name__ == "__main__":
     LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    thumbnails_dir = Path(data_dir / "train_thumbnails")
-    train_images = sorted(glob(str(thumbnails_dir / "*.png")))
-
+    resized_dir = Path(data_dir / "train_images_512")
+    train_images = sorted(glob(str(resized_dir / "*.png")))
+       
     def get_train_file_path(image_id):
-        return str(thumbnails_dir / f"{image_id}_thumbnail.png")
+        return str(resized_dir / f"{image_id}.png")
 
     train_df = pd.read_csv(data_dir / "train.csv")
+    train_df['label'] = train_df['label'].map(CFG.label_dict)
+    
     train_df["file_path"] = train_df["image_id"].apply(get_train_file_path)
-    train_df = train_df[train_df["file_path"].isin(train_images)].reset_index(drop=True)
-
-    encoder = LabelEncoder()
-    train_df["label"] = encoder.fit_transform(train_df["label"])
-    print(train_df["label"].value_counts())
-    with open("dataset/label_encoder.pkl", "wb") as fp:
-        joblib.dump(encoder, fp)
+    print(train_df.head())
 
     skf = StratifiedKFold(n_splits=CFG.folds)
 
