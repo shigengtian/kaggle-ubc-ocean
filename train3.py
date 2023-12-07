@@ -48,18 +48,18 @@ class CFG:
     competition = "ubc-ocean"
     _wandb_kernel = "shigengtian/ubc-ocean"
 
-    exp_name = "exp-seg"
+    exp_name = "exp-03"
 
-    model_name = "efficientnet-b0"
+    model_name = "tf_efficientnetv2_s_in21ft1k"
 
     # seed for data-split, layer init, augs
     seed = 42
 
     # number of folds for data-split
-    folds = 10
+    folds = 5
 
     # which folds to train
-    selected_folds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    selected_folds = [0, 1, 2, 3, 4]
 
     # size of the image
     img_size = 512
@@ -85,27 +85,28 @@ class CFG:
     num_classes = len(target_cols)
 
 
-class CustomDataset(Dataset):
+class UBCDataset(Dataset):
     def __init__(self, df, transforms=None):
+        self.df = df
+        self.file_names = df["file_path"].values
+        self.labels = df["label"].values
         self.transforms = transforms
-        self.img_path = df["train_thumbnails_file_paths"].values
-        self.mask_path = df["segmentation_nps_file_paths"].values
 
     def __len__(self):
-        return len(self.img_path)
+        return len(self.df)
 
     def __getitem__(self, index):
-        image = cv2.imread(str(self.img_path[index]))
-        mask = np.load(str(self.mask_path[index])) / 255.0
-        # mask = mask[:, :, np.newaxis]
+        img_path = self.file_names[index]
+        img = cv2.imread(img_path)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        label = self.labels[index]
+
+        label = np.eye(CFG.num_classes)[label]
 
         if self.transforms:
-            augmented = self.transforms(image=image, mask=mask)
-            image = augmented["image"]
-            mask = augmented["mask"]
+            img = self.transforms(image=img)["image"]
 
-        mask = mask.unsqueeze(0)
-        return image, mask
+        return {"image": img, "label": torch.tensor(label, dtype=torch.float32)}
 
 
 def get_transforms(data):
@@ -142,7 +143,7 @@ def get_transforms(data):
                 ToTensorV2(),
             ],
             p=1.0,
-            is_check_shapes=True,
+            is_check_shapes=False,
         )
 
     elif data == "valid":
@@ -161,7 +162,11 @@ def get_transforms(data):
         )
 
 
-def train_fn(train_loader, model, optimizer, epoch, scheduler, fold):
+def criterion(outputs, labels):
+    return nn.BCEWithLogitsLoss()(outputs, labels)
+
+
+def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
     losses = AverageMeter()
     model.train()
     scaler = torch.cuda.amp.GradScaler(enabled=True)
@@ -169,9 +174,9 @@ def train_fn(train_loader, model, optimizer, epoch, scheduler, fold):
     bar = tqdm(total=len(train_loader))
     bar.set_description(f"TRAIN Fold: {fold}, Epoch: {epoch + 1}")
 
-    for step, (images, labels) in enumerate(train_loader):
-        images = images.to(device)
-        labels = labels.to(device)
+    for step, data in enumerate(train_loader):
+        images = data["image"].to(device)
+        labels = data["label"].to(device)
         batch_size = labels.size(0)
 
         with torch.cuda.amp.autocast(enabled=True):
@@ -190,7 +195,7 @@ def train_fn(train_loader, model, optimizer, epoch, scheduler, fold):
     return losses.avg
 
 
-def valid_fn(valid_loader, model, epoch, fold):
+def valid_fn(valid_loader, model, epoch, criterion, fold):
     losses = AverageMeter()
     model.eval()
     bar = tqdm(total=len(valid_loader))
@@ -198,48 +203,77 @@ def valid_fn(valid_loader, model, epoch, fold):
 
     preds = []
     label = []
-    for step, (images, labels) in enumerate(valid_loader):
-        images = images.to(device)
-        labels = labels.to(device)
+    for step, data in enumerate(valid_loader):
+        images = data["image"].to(device)
+        labels = data["label"].to(device)
         batch_size = labels.size(0)
 
         y_preds = model(images)
         loss = criterion(y_preds, labels)
         losses.update(loss.item(), batch_size)
 
+        y_preds = torch.sigmoid(y_preds).detach().cpu().numpy()
+        preds.append(y_preds)
+
+        label.append(labels.to("cpu").numpy())
+
         torch.cuda.empty_cache()
         bar.update()
 
-    return losses.avg
+    preds = np.concatenate(preds)
+    label = np.concatenate(label)
+    auc_score = roc_auc_score(label, preds)
+    # f1_score_micro = f1_score(
+    #     label.argmax(axis=1), preds.argmax(axis=1), average="micro"
+    # )
+
+    # score = balanced_accuracy_score(label.argmax(axis=1), preds.argmax(axis=1))
+    return losses.avg, auc_score
 
 
-JaccardLoss = smp.losses.JaccardLoss(mode="multilabel")
-DiceLoss = smp.losses.DiceLoss(mode="multilabel")
-BCELoss = smp.losses.SoftBCEWithLogitsLoss()
-LovaszLoss = smp.losses.LovaszLoss(mode="multilabel", per_image=False)
-TverskyLoss = smp.losses.TverskyLoss(mode="multilabel", log_loss=False)
+class GeM(nn.Module):
+    def __init__(self, p=3, eps=1e-6):
+        super(GeM, self).__init__()
+        self.p = nn.Parameter(torch.ones(1) * p)
+        self.eps = eps
+
+    def forward(self, x):
+        return self.gem(x, p=self.p, eps=self.eps)
+
+    def gem(self, x, p=3, eps=1e-6):
+        return F.avg_pool2d(x.clamp(min=eps).pow(p), (x.size(-2), x.size(-1))).pow(
+            1.0 / p
+        )
+
+    def __repr__(self):
+        return (
+            self.__class__.__name__
+            + "("
+            + "p="
+            + "{:.4f}".format(self.p.data.tolist()[0])
+            + ", "
+            + "eps="
+            + str(self.eps)
+            + ")"
+        )
 
 
-def dice_coef(y_true, y_pred, thr=0.5, dim=(2, 3), epsilon=0.001):
-    y_true = y_true.to(torch.float32)
-    y_pred = (y_pred > thr).to(torch.float32)
-    inter = (y_true * y_pred).sum(dim=dim)
-    den = y_true.sum(dim=dim) + y_pred.sum(dim=dim)
-    dice = ((2 * inter + epsilon) / (den + epsilon)).mean(dim=(1, 0))
-    return dice
+class UBCModel(nn.Module):
+    def __init__(self, model_name, num_classes, pretrained=False, checkpoint_path=None):
+        super(UBCModel, self).__init__()
+        self.model = timm.create_model(model_name, pretrained=pretrained)
 
+        in_features = self.model.classifier.in_features
+        self.model.classifier = nn.Identity()
+        self.model.global_pool = nn.Identity()
+        self.pooling = GeM()
+        self.linear = nn.Linear(in_features, num_classes)
 
-def iou_coef(y_true, y_pred, thr=0.5, dim=(2, 3), epsilon=0.001):
-    y_true = y_true.to(torch.float32)
-    y_pred = (y_pred > thr).to(torch.float32)
-    inter = (y_true * y_pred).sum(dim=dim)
-    union = (y_true + y_pred - y_true * y_pred).sum(dim=dim)
-    iou = ((inter + epsilon) / (union + epsilon)).mean(dim=(1, 0))
-    return iou
-
-
-def criterion(y_pred, y_true):
-    return 0.5 * BCELoss(y_pred, y_true) + 0.5 * DiceLoss(y_pred, y_true)
+    def forward(self, images):
+        features = self.model(images)
+        pooled_features = self.pooling(features).flatten(1)
+        output = self.linear(pooled_features)
+        return output
 
 
 def train_loop(folds, fold):
@@ -248,8 +282,8 @@ def train_loop(folds, fold):
     train_folds = folds[folds["fold"] != fold].reset_index(drop=True)
     valid_folds = folds[folds["fold"] == fold].reset_index(drop=True)
 
-    train_dataset = CustomDataset(train_folds, transforms=get_transforms("train"))
-    valid_dataset = CustomDataset(valid_folds, transforms=get_transforms("valid"))
+    train_dataset = UBCDataset(train_folds, transforms=get_transforms("train"))
+    valid_dataset = UBCDataset(valid_folds, transforms=get_transforms("valid"))
 
     train_loader = DataLoader(
         train_dataset,
@@ -269,14 +303,7 @@ def train_loop(folds, fold):
         drop_last=False,
     )
 
-    model = smp.Unet(
-        encoder_name=CFG.model_name,
-        encoder_weights="imagenet",
-        in_channels=3,
-        classes=1,
-        activation=None,
-    )
-
+    model = UBCModel(CFG.model_name, CFG.num_classes, pretrained=True)
     model.to(device)
 
     optimizer = AdamW(
@@ -287,20 +314,30 @@ def train_loop(folds, fold):
         optimizer, eta_min=1e-6, T_max=500
     )
 
+    best_acc = -1.0
     best_loss = np.inf
     for epoch in range(CFG.epochs):
-        train_loss = train_fn(train_loader, model, optimizer, epoch, scheduler, fold)
+        train_loss = train_fn(
+            train_loader, model, optimizer, epoch, scheduler, criterion, fold
+        )
 
-        valid_loss = valid_fn(valid_loader, model, epoch, fold)
+        valid_loss, valid_acc = valid_fn(valid_loader, model, epoch, criterion, fold)
 
-        LOGGER.info(f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f}")
+        LOGGER.info(
+            f"Epoch {epoch + 1} | Valid Loss: {valid_loss:.4f} | acc:{valid_acc:.4f}"
+        )
 
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
-            torch.save(model.state_dict(), f"{output_path}/seg-fold-{fold}.pth")
+        if valid_acc > best_acc:
+            best_acc = valid_acc
+            LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
+            torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
 
-    LOGGER.info(f"best loss: {best_loss:.4f}")
+        # if valid_loss < best_loss:
+        #     best_loss = valid_loss
+        #     LOGGER.info(f"Epoch {epoch + 1} | Best Valid Loss: {best_loss:.4f}")
+        #     torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+
+    LOGGER.info(f"best acc: {best_acc:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")
 
 
@@ -311,49 +348,27 @@ if __name__ == "__main__":
     LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    thumbnails_dir = Path(data_dir / "train_thumbnails")
-    train_images = sorted(glob(str(thumbnails_dir / "*.png")))
-    train_thumbnails_dir = data_dir / "train_thumbnails"
+    tile_path = Path(data_dir / "tiles")
+    train_tile_images = sorted(glob(str(tile_path / "*.jpg")))
 
-    segmentation_nps = sorted(glob(str(data_dir / "masks_np" / "*.npy")))
-
-    segmentation_nps_df = pd.DataFrame(
-        segmentation_nps, columns=["segmentation_nps_file_paths"]
+    train_tile_images_df = pd.DataFrame(train_tile_images, columns=["file_path"])
+    train_tile_images_df["image_id"] = train_tile_images_df["file_path"].apply(
+        lambda x: x.split("/")[-1].split("_")[0]
     )
 
-    segmentation_nps_df["image_id"] = segmentation_nps_df[
-        "segmentation_nps_file_paths"
-    ].apply(lambda x: str(x).split("/")[-1].split(".")[0])
+    train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": "string"})
 
-    print("segmentation_nps_df")
-    print(segmentation_nps_df.head())
+    skf = StratifiedKFold(n_splits=CFG.folds)
 
-    train_thumbnails_files = list(train_thumbnails_dir.glob("*.png"))
-    print(f"train_thumbnails_files: {len(train_thumbnails_files)}")
+    for fold, (_, val_) in enumerate(skf.split(X=train_df, y=train_df.label)):
+        train_df.loc[val_, "fold"] = int(fold)
 
-    train_thumbnails_files_df = pd.DataFrame(
-        train_thumbnails_files, columns=["train_thumbnails_file_paths"]
-    )
+    train_df["label"] = train_df["label"].map(CFG.label_dict)
+    train_df = train_tile_images_df.merge(train_df, on="image_id", how="left")
 
-    train_thumbnails_files_df["image_id"] = train_thumbnails_files_df[
-        "train_thumbnails_file_paths"
-    ].apply(lambda x: str(x).split("/")[-1].split("_")[0])
-
-    print("train_thumbnails_files_df")
-    print(train_thumbnails_files_df.head())
-
-    train_seg = segmentation_nps_df.merge(
-        train_thumbnails_files_df, on="image_id", how="left"
-    )
-    print(train_seg.head())
-
-    kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)
-    for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_seg)):
-        train_seg.loc[valid_idx, "fold"] = int(fold)
-
-    print(train_seg.head())
+    print(train_df.head())
 
     for fold in CFG.selected_folds:
         LOGGER.info(f"Fold: {fold}")
-        train_loop(train_seg, fold)
+        train_loop(train_df, fold)
         break

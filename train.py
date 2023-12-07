@@ -110,7 +110,6 @@ class UBCDataset(Dataset):
 
 
 def get_transforms(data):
-
     if data == "train":
         return A.Compose(
             [
@@ -347,13 +346,13 @@ if __name__ == "__main__":
     data_dir = Path("dataset")
     resized_dir = Path(data_dir / "train_images_512")
     train_images = sorted(glob(str(resized_dir / "*.png")))
-       
+
     def get_train_file_path(image_id):
         return str(resized_dir / f"{image_id}.png")
 
     train_df = pd.read_csv(data_dir / "train.csv")
-    train_df['label'] = train_df['label'].map(CFG.label_dict)
-    
+    train_df["label"] = train_df["label"].map(CFG.label_dict)
+
     train_df["file_path"] = train_df["image_id"].apply(get_train_file_path)
     print(train_df.head())
 
