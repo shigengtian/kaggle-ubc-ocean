@@ -13,3 +13,6 @@ if __name__ == "__main__":
     print("is_tma_count", is_tma_count)
     print("isnot_tma_count", isnot_tma_count)
     print(len(train_df))
+
+    
+    print(train_df[ train_df["is_tma"] == True])
