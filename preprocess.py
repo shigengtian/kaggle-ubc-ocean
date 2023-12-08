@@ -96,9 +96,6 @@ if __name__ == "__main__":
     print(train_df)
     print(train_df[train_df["is_tma"] == True].head())
      
-    # print(train_csv_df.head())
-    # print(len(train_df))
-    # print(train_df.head())
 
     tile_size = 2048
     save_path = "dataset/tiles"
