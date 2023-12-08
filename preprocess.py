@@ -91,47 +91,49 @@ if __name__ == "__main__":
     train_csv_df = pd.read_csv(data_dir / "train.csv", dtype=str)
     
     train_df = train_df.merge(train_csv_df, on="image_id", how="left")
-
-    print(train_df[train_df["is_tma"] == "True"].head())
     
+    
+    print(train_df)
+    print(train_df[train_df["is_tma"] == True].head())
+     
     # print(train_csv_df.head())
     # print(len(train_df))
     # print(train_df.head())
 
-    # tile_size = 2048
-    # save_path = "dataset/tiles"
+    tile_size = 2048
+    save_path = "dataset/tiles"
 
-    # for index, row in train_df.iterrows():
-    #     img_id = row["image_id"]
-    #     img_path = row["img_file_paths"]
-    #     mask_path = row["mask_file_paths"]
-    #     img = cv2.imread(str(img_path))
+    for index, row in train_df.iterrows():
+        img_id = row["image_id"]
+        img_path = row["img_file_paths"]
+        mask_path = row["mask_file_paths"]
+        img = cv2.imread(str(img_path))
 
-    #     height, width = img.shape[:2]
+        height, width = img.shape[:2]
 
-    #     mask = cv2.imread(str(mask_path))
-    #     mask = mask[:, :, 2]
-    #     mask = (mask > 0).astype(int)
+        mask = cv2.imread(str(mask_path))
+        mask = mask[:, :, 2]
+        mask = (mask > 0).astype(int)
 
-    #     rows = height // tile_size
-    #     cols = width // tile_size
+        rows = height // tile_size
+        cols = width // tile_size
 
-    #     for i in range(rows):
-    #         for j in range(cols):
-    #             tile_mask = mask[
-    #                 i * tile_size : (i + 1) * tile_size,
-    #                 j * tile_size : (j + 1) * tile_size,
-    #             ]
-    #             true_percentage = tile_mask.sum() / tile_mask.size
-    #             print(tile_mask.size)
-    #             if true_percentage < 0.5:
-    #                 continue
+        for i in range(rows):
+            for j in range(cols):
+                tile_mask = mask[
+                    i * tile_size : (i + 1) * tile_size,
+                    j * tile_size : (j + 1) * tile_size,
+                ]
+                true_percentage = tile_mask.sum() / tile_mask.size
+                print(tile_mask.size)
+                if true_percentage < 0.5:
+                    continue
 
-    #             tile = img[
-    #                 i * tile_size : (i + 1) * tile_size,
-    #                 j * tile_size : (j + 1) * tile_size,
-    #             ]
+                tile = img[
+                    i * tile_size : (i + 1) * tile_size,
+                    j * tile_size : (j + 1) * tile_size,
+                ]
 
-    #             tile_filename = f"{img_id}_{i}_{j}.jpg"
-    #             tile_path = f"{save_path}/{tile_filename}"
-    #             cv2.imwrite(tile_path, tile)
+                tile_filename = f"{img_id}_{i}_{j}.jpg"
+                tile_path = f"{save_path}/{tile_filename}"
+                cv2.imwrite(tile_path, tile)

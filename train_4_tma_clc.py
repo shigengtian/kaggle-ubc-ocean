@@ -117,8 +117,8 @@ def get_transforms(data):
                 A.Resize(CFG.img_size, CFG.img_size, interpolation=cv2.INTER_NEAREST),
                 A.HorizontalFlip(p=0.5),
                 A.VerticalFlip(p=0.5),
-                A.RandomBrightnessContrast(p=0.75),
-                A.ShiftScaleRotate(p=0.75),
+                A.RandomBrightnessContrast(p=0.5),
+                A.ShiftScaleRotate(p=0.5),
                 A.OneOf(
                     [
                         A.GaussNoise(var_limit=[10, 50]),
@@ -352,25 +352,32 @@ if __name__ == "__main__":
     train_df["label"] = train_df["label"].map(CFG.label_dict)
 
     train_df["file_path"] = train_df["image_id"].apply(get_train_file_path)
-    # not_tma_df = train_df[train_df["is_tma"] == False].reset_index(drop=True)
+    
+    not_tma_df = train_df[train_df["is_tma"] == True].reset_index(drop=True)
+    
+    
+    # print(not_tma_df.label.count())
+    # print(not_tma_df)
     # print(not_tma_df)
 
     # skf = StratifiedKFold(n_splits=CFG.folds)
 
     # for fold, (_, val_) in enumerate(skf.split(X=not_tma_df, y=not_tma_df.label)):
     #     not_tma_df.loc[val_, "fold"] = int(fold)
-
+        
+        
+    # print(not_tma_df)
     # for fold in CFG.selected_folds:
     #     LOGGER.info(f"Fold: {fold}")
     #     train_loop(not_tma_df, fold)
     #     break
 
-    skf = StratifiedKFold(n_splits=CFG.folds)
+    # skf = StratifiedKFold(n_splits=CFG.folds)
 
-    for fold, (_, val_) in enumerate(skf.split(X=train_df, y=train_df.label)):
-        train_df.loc[val_, "fold"] = int(fold)
+    # for fold, (_, val_) in enumerate(skf.split(X=train_df, y=train_df.label)):
+    #     train_df.loc[val_, "fold"] = int(fold)
 
-    for fold in CFG.selected_folds:
-        LOGGER.info(f"Fold: {fold}")
-        train_loop(train_df, fold)
-        break
+    # for fold in CFG.selected_folds:
+    #     LOGGER.info(f"Fold: {fold}")
+    #     train_loop(train_df, fold)
+    #     break
