@@ -9,26 +9,6 @@ import cv2
 from glob import glob
 
 
-def extract_image_tiles(img_id, img_path, size=2048):
-    img = cv2.imread(str(img_path))
-    h, w = size, size  # Set the size of the tiles
-    height, width = img.shape[:2]
-
-    save_path = "tiles"
-
-    # Calculate the number of rows and columns
-    rows = height // h
-    cols = width // w
-
-    for i in range(rows):
-        for j in range(cols):
-            tile = img[i * h : (i + 1) * h, j * w : (j + 1) * w]
-            tile_filename = f"{img_id}_{i}_{j}.jpg"
-
-            tile_path = f"dataset/tiles/{tile_filename}"
-            cv2.imwrite(tile_path, tile)
-
-
 def get_thumbnails_df(thumbnails_dir):
     """
     Get train_thumbnails_files_df
@@ -91,12 +71,10 @@ if __name__ == "__main__":
     train_csv_df = pd.read_csv(data_dir / "train.csv", dtype=str)
     
     train_df = train_df.merge(train_csv_df, on="image_id", how="left")
-    
-    
+        
     print(train_df)
     print(train_df[train_df["is_tma"] == True].head())
-     
-
+    
     tile_size = 2048
     save_path = "dataset/tiles"
 
@@ -121,8 +99,10 @@ if __name__ == "__main__":
                     i * tile_size : (i + 1) * tile_size,
                     j * tile_size : (j + 1) * tile_size,
                 ]
+
                 true_percentage = tile_mask.sum() / tile_mask.size
                 print(tile_mask.size)
+                
                 if true_percentage < 0.5:
                     continue
 
