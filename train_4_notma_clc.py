@@ -118,22 +118,22 @@ def get_transforms(data):
                 A.VerticalFlip(p=0.5),
                 A.RandomBrightnessContrast(p=0.75),
                 A.ShiftScaleRotate(p=0.75),
-                A.OneOf(
-                    [
-                        A.GaussNoise(var_limit=[10, 50]),
-                        A.GaussianBlur(),
-                        A.MotionBlur(),
-                    ],
-                    p=0.4,
-                ),
-                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
-                A.CoarseDropout(
-                    max_holes=1,
-                    max_width=int(512 * 0.3),
-                    max_height=int(512 * 0.3),
-                    mask_fill_value=0,
-                    p=0.5,
-                ),
+                # A.OneOf(
+                #     [
+                #         A.GaussNoise(var_limit=[10, 50]),
+                #         A.GaussianBlur(),
+                #         A.MotionBlur(),
+                #     ],
+                #     p=0.4,
+                # ),
+                # A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
+                # A.CoarseDropout(
+                #     max_holes=1,
+                #     max_width=int(512 * 0.3),
+                #     max_height=int(512 * 0.3),
+                #     mask_fill_value=0,
+                #     p=0.5,
+                # ),
                 A.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
@@ -223,7 +223,8 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
     preds = np.concatenate(preds)
     label = np.concatenate(label)
 
-    score = balanced_accuracy_score(label.argmax(axis=1), preds.argmax(axis=1))
+    acc = np.sum(np.argmax(preds, axis=1) == np.argmax(label, axis=1))
+    score = acc / len(preds)
     return losses.avg, score
 
 
@@ -328,7 +329,6 @@ def train_loop(folds, fold):
             LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
             torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
 
-
     LOGGER.info(f"best acc: {best_acc:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")
 
@@ -348,18 +348,17 @@ if __name__ == "__main__":
 
     train_df = pd.read_csv(data_dir / "train.csv")
     train_df["label"] = train_df["label"].map(CFG.label_dict)
-    
 
     train_df["file_path"] = train_df["image_id"].apply(get_train_file_path)
-    not_tma_df = train_df[train_df["is_tma"] == False].reset_index(drop=True) 
-    print(not_tma_df)
+    # not_tma_df = train_df[train_df["is_tma"] == False].reset_index(drop=True)
+    # print(not_tma_df)
 
     skf = StratifiedKFold(n_splits=CFG.folds)
 
-    for fold, (_, val_) in enumerate(skf.split(X=not_tma_df, y=not_tma_df.label)):
-        not_tma_df.loc[val_, "fold"] = int(fold)
+    for fold, (_, val_) in enumerate(skf.split(X=train_df, y=train_df.label)):
+        train_df.loc[val_, "fold"] = int(fold)
 
     for fold in CFG.selected_folds:
         LOGGER.info(f"Fold: {fold}")
-        train_loop(not_tma_df, fold)
+        train_loop(train_df, fold)
         break

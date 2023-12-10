@@ -89,7 +89,7 @@ class CFG:
 class UBCDataset(Dataset):
     def __init__(self, df, transforms=None):
         self.df = df
-        self.file_names = df["file_path"].values
+        self.file_names = df["img_path"].values
         self.labels = df["label"].values
         self.transforms = transforms
 
@@ -101,13 +101,13 @@ class UBCDataset(Dataset):
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         label = self.labels[index]
-
-        label = np.eye(CFG.num_classes)[label]
+        one_hot_label = np.zeros(CFG.num_classes)
+        one_hot_label[label] = 1.0
 
         if self.transforms:
             img = self.transforms(image=img)["image"]
 
-        return {"image": img, "label": torch.tensor(label, dtype=torch.float32)}
+        return {"image": img, "label": torch.tensor(one_hot_label, dtype=torch.float32)}
 
 
 def get_transforms(data):
@@ -127,14 +127,14 @@ def get_transforms(data):
                     ],
                     p=0.4,
                 ),
-                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
-                A.CoarseDropout(
-                    max_holes=1,
-                    max_width=int(512 * 0.3),
-                    max_height=int(512 * 0.3),
-                    mask_fill_value=0,
-                    p=0.5,
-                ),
+                # A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
+                # A.CoarseDropout(
+                #     max_holes=1,
+                #     max_width=int(512 * 0.3),
+                #     max_height=int(512 * 0.3),
+                #     mask_fill_value=0,
+                #     p=0.5,
+                # ),
                 A.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
@@ -224,8 +224,8 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
     preds = np.concatenate(preds)
     label = np.concatenate(label)
 
-    score = precision_score(label.argmax(axis=1), preds.argmax(axis=1), average="macro")
-
+    acc = np.sum(np.argmax(preds, axis=1) == np.argmax(label, axis=1))
+    score = acc / len(preds)
     return losses.avg, score
 
 
@@ -334,6 +334,13 @@ def train_loop(folds, fold):
     LOGGER.info(f"========== fold: {fold} training end ==========")
 
 
+def split_df(df):
+    skf = StratifiedKFold(n_splits=CFG.folds)
+    for fold, (_, val_) in enumerate(skf.split(X=df, y=df.label)):
+        df.loc[val_, "fold"] = int(fold)
+    return df
+
+
 if __name__ == "__main__":
     seed_everything()
     output_path = f"{CFG.exp_name}"
@@ -341,40 +348,21 @@ if __name__ == "__main__":
     LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    resized_dir = Path(data_dir / "train_images_512")
-    train_images = sorted(glob(str(resized_dir / "*.png")))
+    tiles_path = data_dir / "tiles"
+    tile_images = sorted(glob(str(tiles_path / "*.jpg")))
 
-    def get_train_file_path(image_id):
-        return str(resized_dir / f"{image_id}.png")
+    tiles_df = pd.DataFrame()
+    tiles_df["img_path"] = tile_images
+    tiles_df["image_id"] = [x.split("/")[-1].split("_")[0] for x in tile_images]
 
-    train_df = pd.read_csv(data_dir / "train.csv")
+    train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": "string"})
     train_df["label"] = train_df["label"].map(CFG.label_dict)
 
-    train_df["file_path"] = train_df["image_id"].apply(get_train_file_path)
+    train_df = split_df(train_df)
 
-    # not_tma_df = train_df[train_df["is_tma"] == True].reset_index(drop=True)
+    train_df = tiles_df.merge(train_df, on="image_id", how="left")
 
-    # print(not_tma_df.label.count())
-    # print(not_tma_df)
-    # print(not_tma_df)
-
-    # skf = StratifiedKFold(n_splits=CFG.folds)
-
-    # for fold, (_, val_) in enumerate(skf.split(X=not_tma_df, y=not_tma_df.label)):
-    #     not_tma_df.loc[val_, "fold"] = int(fold)
-
-    # print(not_tma_df)
-    # for fold in CFG.selected_folds:
-    #     LOGGER.info(f"Fold: {fold}")
-    #     train_loop(not_tma_df, fold)
-    #     break
-
-    # skf = StratifiedKFold(n_splits=CFG.folds)
-
-    # for fold, (_, val_) in enumerate(skf.split(X=train_df, y=train_df.label)):
-    #     train_df.loc[val_, "fold"] = int(fold)
-
-    # for fold in CFG.selected_folds:
-    #     LOGGER.info(f"Fold: {fold}")
-    #     train_loop(train_df, fold)
-    #     break
+    for fold in CFG.selected_folds:
+        LOGGER.info(f"Fold: {fold}")
+        train_loop(train_df, fold)
+        break
