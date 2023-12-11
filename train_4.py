@@ -36,7 +36,7 @@ from sklearn.preprocessing import LabelEncoder
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-from utils import seed_everything, AverageMeter, get_logger
+from utils import seed_everything, AverageMeter, get_logger, get_thumbnails_df
 
 import segmentation_models_pytorch as smp
 
@@ -88,7 +88,7 @@ class CFG:
 class UBCDataset(Dataset):
     def __init__(self, df, transforms=None):
         self.df = df
-        self.file_names = df["file_path"].values
+        self.file_names = df["thumbnails_file_paths"].values
         self.labels = df["label"].values
         self.transforms = transforms
 
@@ -97,7 +97,7 @@ class UBCDataset(Dataset):
 
     def __getitem__(self, index):
         img_path = self.file_names[index]
-        img = cv2.imread(img_path)
+        img = cv2.imread(str(img_path))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         label = self.labels[index]
 
@@ -116,8 +116,8 @@ def get_transforms(data):
                 A.Resize(CFG.img_size, CFG.img_size, interpolation=cv2.INTER_NEAREST),
                 A.HorizontalFlip(p=0.5),
                 A.VerticalFlip(p=0.5),
-                A.RandomBrightnessContrast(p=0.75),
-                A.ShiftScaleRotate(p=0.75),
+                # A.RandomBrightnessContrast(p=0.5),
+                # A.ShiftScaleRotate(p=0.5),
                 # A.OneOf(
                 #     [
                 #         A.GaussNoise(var_limit=[10, 50]),
@@ -340,23 +340,31 @@ if __name__ == "__main__":
     LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    resized_dir = Path(data_dir / "train_images_512")
-    train_images = sorted(glob(str(resized_dir / "*.png")))
+    # resized_dir = Path(data_dir / "train_images_512")
 
-    def get_train_file_path(image_id):
-        return str(resized_dir / f"{image_id}.png")
-
-    train_df = pd.read_csv(data_dir / "train.csv")
+    train_thumbnails_dir = Path(data_dir / "train_thumbnails")
+    # train_thumbnails_files = sorted(train_thumbnails_dir.glob("*.png"))
+    thumbnails_df =  get_thumbnails_df(train_thumbnails_dir)
+    
+    print(thumbnails_df.head())
+    
+    train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": str})
+    
+    
+    
     train_df["label"] = train_df["label"].map(CFG.label_dict)
+    print(train_df.head())
 
-    train_df["file_path"] = train_df["image_id"].apply(get_train_file_path)
-    # not_tma_df = train_df[train_df["is_tma"] == False].reset_index(drop=True)
-    # print(not_tma_df)
 
     skf = StratifiedKFold(n_splits=CFG.folds)
 
     for fold, (_, val_) in enumerate(skf.split(X=train_df, y=train_df.label)):
         train_df.loc[val_, "fold"] = int(fold)
+        
+
+    
+    train_df = thumbnails_df.merge(train_df, on="image_id", how="left")
+    print(train_df.head())
 
     for fold in CFG.selected_folds:
         LOGGER.info(f"Fold: {fold}")

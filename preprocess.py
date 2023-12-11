@@ -111,6 +111,6 @@ if __name__ == "__main__":
                     j * tile_size : (j + 1) * tile_size,
                 ]
 
-                tile_filename = f"{img_id}_{i}_{j}.jpg"
+                tile_filename = f"{img_id}_{i}_{j}.png"
                 tile_path = f"{save_path}/{tile_filename}"
                 cv2.imwrite(tile_path, tile)
