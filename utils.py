@@ -89,6 +89,16 @@ def get_mask_df(mask_dir):
 
     return mask_files_df
 
+def get_mask_npy_df(mask_dir):
+    mask_files = list(mask_dir.glob("*.npy"))
+    print(f"mask_files: {len(mask_files)}")
+    mask_files_df = pd.DataFrame(mask_files, columns=["mask_file_paths"])
+    mask_files_df["image_id"] = mask_files_df["mask_file_paths"].apply(
+        lambda x: str(x).split("/")[-1].split(".")[0]
+    )
+
+    return mask_files_df
+
 
 def get_img_df(img_dir):
     img_files = list(img_dir.glob("*.png"))
