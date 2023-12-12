@@ -348,20 +348,20 @@ if __name__ == "__main__":
     LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    tiles_path = data_dir / "tiles"
-    tile_images = sorted(glob(str(tiles_path / "*.jpg")))
-
+    tiles_path = data_dir / "tile_2048"
+    tile_images = sorted(glob(str(tiles_path / "*.png")))
+   
     tiles_df = pd.DataFrame()
     tiles_df["img_path"] = tile_images
     tiles_df["image_id"] = [x.split("/")[-1].split("_")[0] for x in tile_images]
-
+   
     train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": "string"})
     train_df["label"] = train_df["label"].map(CFG.label_dict)
 
     train_df = split_df(train_df)
 
     train_df = tiles_df.merge(train_df, on="image_id", how="left")
-
+    print(train_df.head())
     for fold in CFG.selected_folds:
         LOGGER.info(f"Fold: {fold}")
         train_loop(train_df, fold)
