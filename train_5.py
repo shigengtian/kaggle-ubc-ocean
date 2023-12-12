@@ -362,7 +362,7 @@ if __name__ == "__main__":
 
     train_df = tiles_df.merge(train_df, on="image_id", how="left")
 
-    for fold in CFG.selected_folds:
-        LOGGER.info(f"Fold: {fold}")
-        train_loop(train_df, fold)
-        break
+    # for fold in CFG.selected_folds:
+    #     LOGGER.info(f"Fold: {fold}")
+    #     train_loop(train_df, fold)
+    #     break

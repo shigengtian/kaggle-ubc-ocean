@@ -97,7 +97,6 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         image = cv2.imread(str(self.img_path[index]))
         mask = np.load(str(self.mask_path[index])) / 255.0
-        # mask = mask[:, :, np.newaxis]
 
         if self.transforms:
             augmented = self.transforms(image=image, mask=mask)
@@ -115,8 +114,8 @@ def get_transforms(data):
                 A.Resize(CFG.img_size, CFG.img_size, interpolation=cv2.INTER_NEAREST),
                 A.HorizontalFlip(p=0.5),
                 A.VerticalFlip(p=0.5),
-                A.RandomBrightnessContrast(p=0.75),
-                A.ShiftScaleRotate(p=0.75),
+                A.RandomBrightnessContrast(p=0.5),
+                A.ShiftScaleRotate(p=0.5),
                 A.OneOf(
                     [
                         A.GaussNoise(var_limit=[10, 50]),
@@ -125,14 +124,14 @@ def get_transforms(data):
                     ],
                     p=0.4,
                 ),
-                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
-                A.CoarseDropout(
-                    max_holes=1,
-                    max_width=int(512 * 0.3),
-                    max_height=int(512 * 0.3),
-                    mask_fill_value=0,
-                    p=0.5,
-                ),
+                # A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
+                # A.CoarseDropout(
+                #     max_holes=1,
+                #     max_width=int(512 * 0.3),
+                #     max_height=int(512 * 0.3),
+                #     mask_fill_value=0,
+                #     p=0.5,
+                # ),
                 A.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
