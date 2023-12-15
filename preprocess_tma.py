@@ -9,46 +9,6 @@ import cv2
 from glob import glob
 
 
-def get_thumbnails_df(thumbnails_dir):
-    """
-    Get train_thumbnails_files_df
-    """
-    thumbnails_files = list(thumbnails_dir.glob("*.png"))
-    print(f"thumbnails_files: {len(thumbnails_files)}")
-
-    thumbnails_files_df = pd.DataFrame(
-        thumbnails_files, columns=["thumbnails_file_paths"]
-    )
-
-    thumbnails_files_df["image_id"] = thumbnails_files_df[
-        "thumbnails_file_paths"
-    ].apply(lambda x: str(x).split("/")[-1].split("_")[0])
-    return thumbnails_files_df
-
-
-def get_mask_df(mask_dir):
-    mask_files = list(mask_dir.glob("*.png"))
-    print(f"mask_files: {len(mask_files)}")
-    mask_files_df = pd.DataFrame(mask_files, columns=["mask_file_paths"])
-    mask_files_df["image_id"] = mask_files_df["mask_file_paths"].apply(
-        lambda x: str(x).split("/")[-1].split(".")[0]
-    )
-
-    return mask_files_df
-
-
-def get_train_img_df(train_img_dir):
-    img_files = list(train_img_dir.glob("*.png"))
-    print(f"mask_files: {len(img_files)}")
-    train_img_df = pd.DataFrame(img_files, columns=["img_file_paths"])
-
-    train_img_df["image_id"] = train_img_df["img_file_paths"].apply(
-        lambda x: str(x).split("/")[-1].split(".")[0]
-    )
-
-    return train_img_df
-
-
 if __name__ == "__main__":
     data_dir = Path("dataset")
     train_df = pd.read_csv(data_dir / "train.csv")
