@@ -49,7 +49,7 @@ class CFG:
     competition = "ubc-ocean"
     _wandb_kernel = "shigengtian/ubc-ocean"
 
-    exp_name = "exp-06"
+    exp_name = "exp-07-tma"
 
     model_name = "tf_efficientnetv2_s_in21ft1k"
 
@@ -57,7 +57,7 @@ class CFG:
     seed = 42
 
     # number of folds for data-split
-    folds = 10
+    folds = 5
 
     # which folds to train
     selected_folds = [0, 1, 2, 3, 4]
@@ -127,14 +127,14 @@ def get_transforms(data):
                     ],
                     p=0.4,
                 ),
-                # A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
-                # A.CoarseDropout(
-                #     max_holes=1,
-                #     max_width=int(512 * 0.3),
-                #     max_height=int(512 * 0.3),
-                #     mask_fill_value=0,
-                #     p=0.5,
-                # ),
+                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
+                A.CoarseDropout(
+                    max_holes=1,
+                    max_width=int(512 * 0.3),
+                    max_height=int(512 * 0.3),
+                    mask_fill_value=0,
+                    p=0.5,
+                ),
                 A.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
@@ -348,23 +348,15 @@ if __name__ == "__main__":
     LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    tiles_path = data_dir / "tile_2048"
-    mask_path = data_dir / "mask_2048"
-    tile_images = sorted(glob(str(tiles_path / "*.png")))
-    # mask_images = sorted(glob(str(tiles_path / "*.npy")))
-   
-    tiles_df = pd.DataFrame()
-    tiles_df["img_path"] = tile_images
-    tiles_df["image_id"] = [x.split("/")[-1].split("_")[0] for x in tile_images]
-   
+
     train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": "string"})
     train_df["label"] = train_df["label"].map(CFG.label_dict)
+    train_df = train_df[train_df["is_tma"] == True].reset_index(drop=True)
 
     train_df = split_df(train_df)
+    train_df["img_path"] = "dataset/train_images/" + train_df["image_id"] + ".png"
+    print(train_df.head())
 
-
-    train_df = tiles_df.merge(train_df, on="image_id", how="left")
- 
     for fold in CFG.selected_folds:
         LOGGER.info(f"Fold: {fold}")
         train_loop(train_df, fold)

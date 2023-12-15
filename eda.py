@@ -16,3 +16,4 @@ if __name__ == "__main__":
 
     
     print(train_df[ train_df["is_tma"] == True])
+    print(len(train_df[ train_df["is_tma"] == True]))
