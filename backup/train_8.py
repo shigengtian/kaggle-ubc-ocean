@@ -8,7 +8,7 @@ import cv2
 import sklearn
 import matplotlib.pyplot as plt
 import yaml
-
+import math
 import torch
 import torch.nn as nn
 from torch.nn import Parameter
@@ -49,7 +49,7 @@ class CFG:
     competition = "ubc-ocean"
     _wandb_kernel = "shigengtian/ubc-ocean"
 
-    exp_name = "exp-08"
+    exp_name = "exp-09"
 
     model_name = "tf_efficientnetv2_s_in21ft1k"
 
@@ -85,30 +85,60 @@ class CFG:
 
     num_classes = len(target_cols)
 
+    s = 30.0
+    m = 0.5
+    ls_eps = 0.0
+    easy_margin = False
+
+
+# class UBCDataset(Dataset):
+#     def __init__(self, df, transforms=None):
+#         self.df = df
+#         self.file_names = df["img_path"].values
+#         self.labels = df["label"].values
+#         self.transforms = transforms
+
+#     def __len__(self):
+#         return len(self.df)
+
+#     def __getitem__(self, index):
+#         img_path = self.file_names[index]
+#         img = cv2.imread(img_path)
+#         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+#         label = self.labels[index]
+#         # one_hot_label = np.zeros(CFG.num_classes)
+#         # one_hot_label[label] = 1.0
+
+#         if self.transforms:
+#             img = self.transforms(image=img)["image"]
+
+#         return {"image": img, "label": torch.tensor(label, dtype=torch.long)}
+
 
 class UBCDataset(Dataset):
     def __init__(self, df, transforms=None):
         self.df = df
-        self.file_names = df["img_path"].values
-        self.labels = df["label"].values
+        self.file_names = df['img_path'].values
+        self.labels = df['label'].values
         self.transforms = transforms
-
+        
     def __len__(self):
         return len(self.df)
-
+    
     def __getitem__(self, index):
         img_path = self.file_names[index]
         img = cv2.imread(img_path)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         label = self.labels[index]
-        one_hot_label = np.zeros(CFG.num_classes)
-        one_hot_label[label] = 1.0
-
+        
         if self.transforms:
             img = self.transforms(image=img)["image"]
-
-        return {"image": img, "label": torch.tensor(one_hot_label, dtype=torch.float32)}
-
+            
+        return {
+            'image': img,
+            'label': torch.tensor(label, dtype=torch.long)
+        }
+        
 
 def get_transforms(data):
     if data == "train":
@@ -164,7 +194,8 @@ def get_transforms(data):
 
 
 def criterion(outputs, labels):
-    return nn.BCEWithLogitsLoss()(outputs, labels)
+    return nn.CrossEntropyLoss()(outputs, labels)
+    # return nn.BCEWithLogitsLoss()(outputs, labels)
 
 
 def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
@@ -181,7 +212,7 @@ def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
         batch_size = labels.size(0)
 
         with torch.cuda.amp.autocast(enabled=True):
-            y_preds = model(images)
+            y_preds = model(images, labels)
             loss = criterion(y_preds, labels)
 
         losses.update(loss.item(), batch_size)
@@ -205,28 +236,47 @@ def valid_fn(valid_loader, model, epoch, criterion, fold):
 
     preds = []
     label = []
+    
+    dataset_size = 0
+    running_loss = 0.0
+    running_acc = 0.0
+    
     for step, data in enumerate(valid_loader):
         images = data["image"].to(device)
         labels = data["label"].to(device)
         batch_size = labels.size(0)
 
-        y_preds = model(images)
+        y_preds = model(images, labels)
         loss = criterion(y_preds, labels)
         losses.update(loss.item(), batch_size)
 
-        y_preds = torch.sigmoid(y_preds).detach().cpu().numpy()
-        preds.append(y_preds)
+        _, predicted = torch.max(model.softmax(y_preds), 1)
+        
+        # y_preds = torch.sigmoid(y_preds).detach().cpu().numpy()
+        
+        acc = torch.sum( predicted == labels )
+        
+        running_loss += (loss.item() * batch_size)
+        running_acc  += acc.item()
+        dataset_size += batch_size
+        
+        epoch_loss = running_loss / dataset_size
+        epoch_acc = running_acc / dataset_size
+        
+        # preds.append(y_preds)
 
-        label.append(labels.to("cpu").numpy())
+
+        # label.append(labels.to("cpu").numpy())
 
         torch.cuda.empty_cache()
         bar.update()
 
-    preds = np.concatenate(preds)
-    label = np.concatenate(label)
+    # preds = np.concatenate(preds)
+    # label = np.concatenate(label)
 
-    acc = np.sum(np.argmax(preds, axis=1) == np.argmax(label, axis=1))
-    score = acc / len(preds)
+    # acc = np.sum(np.argmax(preds, axis=1) == np.argmax(label, axis=1))
+    # score = acc / len(preds)
+    score = epoch_acc
     return losses.avg, score
 
 
@@ -256,23 +306,84 @@ class GeM(nn.Module):
             + ")"
         )
 
+class ArcMarginProduct(nn.Module):
+    r"""Implement of large margin arc distance: :
+        Args:
+            in_features: size of each input sample
+            out_features: size of each output sample
+            s: norm of input feature
+            m: margin
+            cos(theta + m)
+        """
+    def __init__(self, in_features, out_features, s=30.0, 
+                 m=0.50, easy_margin=False, ls_eps=0.0):
+        super(ArcMarginProduct, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.s = s
+        self.m = m
+        self.ls_eps = ls_eps  # label smoothing
+        self.weight = nn.Parameter(torch.FloatTensor(out_features, in_features))
+        nn.init.xavier_uniform_(self.weight)
+
+        self.easy_margin = easy_margin
+        self.cos_m = math.cos(m)
+        self.sin_m = math.sin(m)
+        self.th = math.cos(math.pi - m)
+        self.mm = math.sin(math.pi - m) * m
+
+    def forward(self, input, label):
+        # --------------------------- cos(theta) & phi(theta) ---------------------
+        cosine = F.linear(F.normalize(input), F.normalize(self.weight))
+        sine = torch.sqrt(1.0 - torch.pow(cosine, 2))
+        phi = cosine * self.cos_m - sine * self.sin_m
+        if self.easy_margin:
+            phi = torch.where(cosine > 0, phi, cosine)
+        else:
+            phi = torch.where(cosine > self.th, phi, cosine - self.mm)
+        # --------------------------- convert label to one-hot ---------------------
+        # one_hot = torch.zeros(cosine.size(), requires_grad=True, device='cuda')
+        one_hot = torch.zeros(cosine.size(), device=device)
+        one_hot.scatter_(1, label.view(-1, 1).long(), 1)
+        if self.ls_eps > 0:
+            one_hot = (1 - self.ls_eps) * one_hot + self.ls_eps / self.out_features
+        # -------------torch.where(out_i = {x_i if condition_i else y_i) ------------
+        output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
+        output *= self.s
+
+        return output
 
 class UBCModel(nn.Module):
     def __init__(self, model_name, num_classes, pretrained=False, checkpoint_path=None):
         super(UBCModel, self).__init__()
-        self.model = timm.create_model(model_name, pretrained=pretrained)
-
+        self.model = timm.create_model(model_name, pretrained=pretrained, checkpoint_path=checkpoint_path)
+        embedding_size = 512
         in_features = self.model.classifier.in_features
         self.model.classifier = nn.Identity()
         self.model.global_pool = nn.Identity()
         self.pooling = GeM()
-        self.linear = nn.Linear(in_features, num_classes)
+        self.softmax = nn.Softmax(dim=1)
+        self.embedding = nn.Linear(in_features, embedding_size)
+        self.fc = ArcMarginProduct(embedding_size, 
+                                   CFG.num_classes,
+                                   s=CFG.s, 
+                                   m=CFG.m, 
+                                   easy_margin=CFG.easy_margin, 
+                                   ls_eps=CFG.ls_eps)
 
-    def forward(self, images):
+    def forward(self, images, labels):
         features = self.model(images)
         pooled_features = self.pooling(features).flatten(1)
-        output = self.linear(pooled_features)
+        embedding = self.embedding(pooled_features)
+        output = self.fc(embedding, labels)
         return output
+    
+    def extract(self, images):
+        features = self.model(images)
+        pooled_features = self.pooling(features).flatten(1)
+        embedding = self.embedding(pooled_features)
+        return embedding
+
 
 
 def train_loop(folds, fold):
