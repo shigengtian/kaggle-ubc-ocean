@@ -59,10 +59,10 @@ if __name__ == "__main__":
     data_dir = Path("dataset")
     train_images = sorted(glob(str(data_dir / "train_images/*.png")))
     train_df = pd.read_csv(data_dir / "train.csv")
-    target_path = data_dir / "train_thumbnails_custom"
+    target_path = data_dir / "train_thumbnails_3500"
     target_path.mkdir(exist_ok=True)
 
-    num_processes = 12 
+    num_processes = 12
     Parallel(n_jobs=num_processes, backend="multiprocessing")(
         delayed(process_image)(row, data_dir, target_path)
         for _, row in tqdm(train_df.iterrows(), total=len(train_df))
