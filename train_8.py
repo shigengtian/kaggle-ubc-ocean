@@ -49,7 +49,7 @@ class CFG:
     competition = "ubc-ocean"
     _wandb_kernel = "shigengtian/ubc-ocean"
 
-    exp_name = "exp-06"
+    exp_name = "exp-08"
 
     model_name = "tf_efficientnetv2_s_in21ft1k"
 
@@ -65,10 +65,10 @@ class CFG:
     # size of the image
     img_size = 512
 
-    # batch_size and epochs
     batch_size = 8
+    # batch_size and epochs
     epochs = 30
-    num_workers = 20
+    num_workers = 8 
 
     lr = 1e-4
     weight_decay = 1e-6
@@ -196,6 +196,7 @@ def train_fn(train_loader, model, optimizer, epoch, scheduler, criterion, fold):
     return losses.avg
 
 
+@torch.inference_mode()
 def valid_fn(valid_loader, model, epoch, criterion, fold):
     losses = AverageMeter()
     model.eval()
@@ -245,14 +246,14 @@ class GeM(nn.Module):
 
     def __repr__(self):
         return (
-                self.__class__.__name__
-                + "("
-                + "p="
-                + "{:.4f}".format(self.p.data.tolist()[0])
-                + ", "
-                + "eps="
-                + str(self.eps)
-                + ")"
+            self.__class__.__name__
+            + "("
+            + "p="
+            + "{:.4f}".format(self.p.data.tolist()[0])
+            + ", "
+            + "eps="
+            + str(self.eps)
+            + ")"
         )
 
 
@@ -328,7 +329,9 @@ def train_loop(folds, fold):
         if valid_acc > best_acc:
             best_acc = valid_acc
             LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
-            torch.save(model.state_dict(), f"{output_path}/fold-{fold}.pth")
+            torch.save(
+                model.state_dict(), f"{output_path}/{CFG.exp_name}-fold-{fold}.pth"
+            )
 
     LOGGER.info(f"best acc: {best_acc:.4f}")
     LOGGER.info(f"========== fold: {fold} training end ==========")
@@ -348,24 +351,18 @@ if __name__ == "__main__":
     LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    tiles_path = data_dir / "tile_2048"
-    mask_path = data_dir / "mask_2048"
-    tile_images = sorted(glob(str(tiles_path / "*.png")))
-    # mask_images = sorted(glob(str(tiles_path / "*.npy")))
-   
-    tiles_df = pd.DataFrame()
-    tiles_df["img_path"] = tile_images
-    tiles_df["image_id"] = [x.split("/")[-1].split("_")[0] for x in tile_images]
-   
     train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": "string"})
+
+    def get_img_path(x):
+        return f"{data_dir}/train_thumbnails_custom/{x}.png"
+
+    train_df["img_path"] = train_df["image_id"].apply(get_img_path)
     train_df["label"] = train_df["label"].map(CFG.label_dict)
 
     train_df = split_df(train_df)
 
-
-    train_df = tiles_df.merge(train_df, on="image_id", how="left")
- 
     for fold in CFG.selected_folds:
+
         LOGGER.info(f"Fold: {fold}")
         train_loop(train_df, fold)
-        break
+        # break
