@@ -109,6 +109,7 @@ if __name__ == "__main__":
                 tile_width = tile_size
                 tile_height = tile_size
 
+                # Adjust bounds
                 if left + tile_width > width:
                     tile_width = width - left
 
@@ -116,6 +117,7 @@ if __name__ == "__main__":
                     tile_height = height - top
 
                 if tile_width <= 0 or tile_height <= 0:
+                    # Handle the case where either width or height is not positive
                     continue
 
                 tile = img.crop(left, top, tile_width, tile_height)
