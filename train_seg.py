@@ -66,7 +66,7 @@ class CFG:
 
     # batch_size and epochs
     batch_size = 8
-    epochs = 30
+    epochs = 10
     num_workers = 20
 
     lr = 1e-4
@@ -88,21 +88,25 @@ class CFG:
 class CustomDataset(Dataset):
     def __init__(self, df, transforms=None):
         self.transforms = transforms
-        self.img_path = df["train_thumbnails_file_paths"].values
-        self.mask_path = df["segmentation_nps_file_paths"].values
+        self.img_path = df["tile_path"].values
+        self.mask_path = df["tile_mask_path"].values
 
     def __len__(self):
         return len(self.img_path)
 
     def __getitem__(self, index):
         image = cv2.imread(str(self.img_path[index]))
-        mask = np.load(str(self.mask_path[index])) / 255.0
-
+        mask = cv2.imread(str(self.mask_path[index]))
+        
+        mask = mask[..., 2]
+        mask = (mask > 0).astype(np.float32)
+    
+ 
         if self.transforms:
             augmented = self.transforms(image=image, mask=mask)
             image = augmented["image"]
             mask = augmented["mask"]
-
+            
         mask = mask.unsqueeze(0)
         return image, mask
 
@@ -303,18 +307,65 @@ def train_loop(folds, fold):
     LOGGER.info(f"========== fold: {fold} training end ==========")
 
 
+    
+
 if __name__ == "__main__":
     seed_everything()
     output_path = f"{CFG.exp_name}"
     os.makedirs(output_path, exist_ok=True)
     LOGGER = get_logger(f"{output_path}/train")
+    
+    
+    if False:
+        data_dir = Path("dataset")
+        tile_path = data_dir / "train_tiles_2048"
+        tile_mask_path = data_dir / "train_tiles_2048_mask"
 
-    data_dir = Path("dataset")
-    tile_path = data_dir/"train_tiles_2048"
-    tile_files = sorted(glob(str(tile_path)+"/.png"))
-    print(tile_files)
+
+        tile_files = sorted(glob(str(tile_path / "*.png")))
+        tile_df = pd.DataFrame()
+        tile_df["tile_path"] = tile_files
+        tile_df["tile_id"] = tile_df["tile_path"].apply(lambda x: x.split("/")[-1]) 
+        
+        tile_mask_df = pd.DataFrame()
+        tile_mask_files = sorted(glob(str(tile_mask_path / "*.png")))
+        tile_mask_df["tile_mask_path"] = tile_mask_files
+        tile_mask_df["tile_id"] = tile_mask_df["tile_mask_path"].apply(lambda x: x.split("/")[-1])
+        print(tile_mask_df.head())
+        
+        train_df = tile_df.merge(tile_mask_df, on="tile_id", how="left")
+        print(train_df.head())
+        
+
+        tumor_ratio = []
+        for index, row in train_df.iterrows():
+            mask = cv2.imread(row.tile_mask_path)
+            
+            red_channel = mask[..., 2]
+            
+            tummor_area_ratio = np.sum(red_channel > 0) / red_channel.size
+            tumor_ratio.append(tummor_area_ratio)
+
+        train_df["tumor_ratio"] = tumor_ratio
+        train_df.to_csv("dataset/train_tile_mask.csv", index=False) 
     
     
+    train_df = pd.read_csv("dataset/train_tile_mask.csv")
+    train_df = train_df[train_df["tumor_ratio"] > 0.1].reset_index(drop=True)
+    print(train_df.head())
+    
+    kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)
+    for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_df)):
+        train_df.loc[valid_idx, "fold"] = int(fold)
+        
+    print(train_df.head())
+    
+    for fold in CFG.selected_folds:
+        LOGGER.info(f"Fold: {fold}")
+        train_loop(train_df, fold)
+        break
+
+
     # thumbnails_dir = Path(data_dir / "train_thumbnails")
     # train_images = sorted(glob(str(thumbnails_dir / "*.png")))
     # train_thumbnails_dir = data_dir / "train_thumbnails"
@@ -357,7 +408,3 @@ if __name__ == "__main__":
 
     # print(train_seg.head())
 
-    # for fold in CFG.selected_folds:
-    #     LOGGER.info(f"Fold: {fold}")
-    #     train_loop(train_seg, fold)
-    #     break

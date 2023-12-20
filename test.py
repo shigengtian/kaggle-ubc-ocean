@@ -18,6 +18,7 @@ from pathlib import Path
 from glob import glob
 from joblib import Parallel, delayed
 from PIL import Image
+import shutil
 
 
 # def vips_read_image(image_path, longest_edge):
@@ -56,16 +57,85 @@ from PIL import Image
 #         cv2.imwrite(str(target_path / f"{row.image_id}.png"), img)
 
 
-def convert_rgb_to_labels(img_path: str, folder: str):
-    name = os.path.basename(img_path)
-    img = np.array(Image.open(img_path))
-    # plt.imshow(img)
-    bg = np.ones((img.shape[0], img.shape[1], 1)) * 128
-    stack = np.concatenate((bg, img), axis=2)
-    mask = np.argmax(stack, axis=2).astype(np.uint8)
-    img_path = os.path.join(folder, name)
-    Image.fromarray(mask).save(img_path)
-    return img_path
+# def convert_rgb_to_labels(img_path: str, folder: str):
+#     name = os.path.basename(img_path)
+#     img = np.array(Image.open(img_path))
+#     # plt.imshow(img)
+#     bg = np.ones((img.shape[0], img.shape[1], 1)) * 128
+#     stack = np.concatenate((bg, img), axis=2)
+#     mask = np.argmax(stack, axis=2).astype(np.uint8)
+#     img_path = os.path.join(folder, name)
+#     Image.fromarray(mask).save(img_path)
+#     return img_path
+
+
+def process_image(row, data_dir, tile_2048_path, tile_2048_mask_path):
+    tma = row["is_tma"]
+    image_id = row["image_id"]
+    img_path = data_dir / "train_images" / f"{row.image_id}.png"
+    mask_path = row["mask_path"]
+
+    img = pyvips.Image.new_from_file(img_path)
+    mask = pyvips.Image.new_from_file(mask_path)
+
+    height = img.height
+    width = img.width
+
+    if ~tma:
+        # Iterate over the image in tiles
+        for y in range(0, height, tile_size):
+            for x in range(0, width, tile_size):
+                # Extract a tile from the image and mask
+                img_tile = img.crop(
+                    x, y, min(tile_size, width - x), min(tile_size, height - y)
+                ).numpy()
+
+                gray = cv2.cvtColor(img_tile, cv2.COLOR_BGR2GRAY)
+                _, binary_image = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+
+                # black area ratio threshold start from here
+                black_pixels = np.count_nonzero(binary_image == 0)
+                total_pixels = np.prod(binary_image.shape[:2])
+                black_area_ratio = black_pixels / total_pixels
+
+                # black_pixels = total_pixels - np.count_nonzero(binary_image)
+
+                # black_area_ratio = black_pixels / total_pixels
+
+                if black_area_ratio > 0.3:
+                    print(f"black_area_ratio: {black_area_ratio}")
+                    continue
+                # black area ratio threshold end here
+
+                # white area ratio threshold start from here
+                # white_pixels = np.count_nonzero(binary_image == 255)
+                # white_area_ratio = white_pixels / total_pixels
+
+                # if white_area_ratio > 0.7:
+                #     print(f"white_area_ratio: {white_area_ratio}")
+                #     continue
+                # white area ratio threshold end here
+
+                mask_tile = mask.crop(
+                    x, y, min(tile_size, width - x), min(tile_size, height - y)
+                ).numpy()
+
+                # mask_tile_tumor_mask =
+
+                tile_save_path = tile_2048_path / f"{image_id}_tile_{x}_{y}.png"
+                Image.fromarray(img_tile).resize(new_size, Image.LANCZOS).save(
+                    tile_save_path
+                )
+
+                mask_tile_save_path = (
+                    tile_2048_mask_path / f"{image_id}_tile_{x}_{y}.png"
+                )
+
+                Image.fromarray(mask_tile).resize(new_size, Image.LANCZOS).save(
+                    mask_tile_save_path
+                )
+    else:
+        pass
 
 
 if __name__ == "__main__":
@@ -81,105 +151,89 @@ if __name__ == "__main__":
 
     train_df = train_mask_df.merge(train_df, on="image_id", how="left")
 
-    #    target_path = data_dir / "train_thumbnails_3500"
-    #    target_path.mkdir(exist_ok=True)
-    #
-    #    num_processes = 12
-    #    Parallel(n_jobs=num_processes, backend="multiprocessing")(
-    #        delayed(process_image)(row, data_dir, target_path)
-    #        for _, row in tqdm(train_df.iterrows(), total=len(train_df))
-    #    )
-
     tile_size = 2048
     white_thr = 240
     drop_thr = 0.6
+    new_size = (512, 512)
+
     tile_2048_path = data_dir / "train_tiles_2048"
+    shutil.rmtree(str(tile_2048_path))
     tile_2048_path.mkdir(exist_ok=True)
 
     tile_2048_mask_path = data_dir / "train_tiles_2048_mask"
+    shutil.rmtree(str(tile_2048_mask_path))
     tile_2048_mask_path.mkdir(exist_ok=True)
 
-    for index, row in tqdm(train_df.iterrows(), total=len(train_df)):
-        tma = row["is_tma"]
-        image_id = row["image_id"]
-        img_path = data_dir / "train_images" / f"{row.image_id}.png"
-        mask_path = row["mask_path"]
+    num_processes = 12
+    Parallel(n_jobs=num_processes, backend="multiprocessing")(
+        delayed(process_image)(row, data_dir, tile_2048_path, tile_2048_mask_path)
+        for _, row in tqdm(train_df.iterrows(), total=len(train_df))
+    )
 
-        img = pyvips.Image.new_from_file(img_path)
-        # mask = pyvips.Image.new_from_file(mask_path)
+    # for index, row in tqdm(train_df.iterrows(), total=len(train_df)):
+    #     tma = row["is_tma"]
+    #     image_id = row["image_id"]
+    #     img_path = data_dir / "train_images" / f"{row.image_id}.png"
+    #     mask_path = row["mask_path"]
 
-        height = img.height
-        width = img.width
+    #     img = pyvips.Image.new_from_file(img_path)
+    #     mask = pyvips.Image.new_from_file(mask_path)
 
-        if ~tma:
-            # Iterate over the image in tiles
-            for y in range(0, height, tile_size):
-                for x in range(0, width, tile_size):
-                    # Extract a tile from the image and mask
-                    img_tile = img.crop(
-                        x, y, min(tile_size, width - x), min(tile_size, height - y)
-                    ).numpy()
+    #     height = img.height
+    #     width = img.width
 
-                    # mask_tile = mask.crop(
-                    #     x, y, min(tile_size, width - x), min(tile_size, height - y)
-                    # ).numpy()
+    #     if ~tma:
+    #         # Iterate over the image in tiles
+    #         for y in range(0, height, tile_size):
+    #             for x in range(0, width, tile_size):
+    #                 # Extract a tile from the image and mask
+    #                 img_tile = img.crop(
+    #                     x, y, min(tile_size, width - x), min(tile_size, height - y)
+    #                 ).numpy()
 
-                    # img_tile_numpy = img_tile.numpy()
+    #                 gray = cv2.cvtColor(img_tile, cv2.COLOR_BGR2GRAY)
+    #                 _, binary_image = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
 
-                    black_bg = np.sum(img_tile, axis=2) == 0
-                    img_tile[black_bg, :] = 255
-                    mask_bg = np.mean(img_tile, axis=2) > white_thr
-                    if np.sum(mask_bg) >= (np.prod(mask_bg.shape) * drop_thr):
-                        # print(f"skip almost empty tile: {k:06}_{int(x_ / w)}-{int(y_ / h)}")
-                        continue
+    #                 # black area ratio threshold start from here
+    #                 black_pixels = np.count_nonzero(binary_image == 0)
+    #                 total_pixels = np.prod(binary_image.shape[:2])
+    #                 black_area_ratio = black_pixels / total_pixels
 
-                    new_size = (512, 512)
-                    tile_save_path = tile_2048_path / f"{image_id}_tile_{x}_{y}.png"
-                    Image.fromarray(img_tile).resize(new_size, Image.LANCZOS).save(
-                        tile_save_path
-                    )
+    #                 # black_pixels = total_pixels - np.count_nonzero(binary_image)
 
-                    # img_tile_numpy = img_tile.numpy()
-                    # if np.max(img_tile_numpy) == 0:
-                    #     print("black tile")
-                    #     continue
+    #                 # black_area_ratio = black_pixels / total_pixels
 
-                    # use first channel check black area
-                    # img_first_channel_mask = img_tile_numpy[:, :, 0] > 0
-                    # not_black_precentage = np.sum(img_first_channel_mask) / (
-                    #     img_tile_numpy.shape[0] * img_tile_numpy.shape[1]
-                    # )
+    #                 if black_area_ratio > 0.3:
+    #                     print(f"black_area_ratio: {black_area_ratio}")
+    #                     continue
+    #                 # black area ratio threshold end here
 
-                    # if not_black_precentage > 0.8:
-                    #     print("black area > 0.8")
-                    #     continue
+    #                 # white area ratio threshold start from here
+    #                 # white_pixels = np.count_nonzero(binary_image == 255)
+    #                 # white_area_ratio = white_pixels / total_pixels
 
-                    # white_bg = np.mean(img_tile_numpy, axis=2) > white_thr
-                    # if np.sum(white_bg) >= (np.prod(white_bg.shape) * white_drop_thr):
-                    #     print(f"skip almost empty tile")
-                    #     continue
+    #                 # if white_area_ratio > 0.7:
+    #                 #     print(f"white_area_ratio: {white_area_ratio}")
+    #                 #     continue
+    #                 # white area ratio threshold end here
 
-                    # true_percentage = tile_mask.sum() / tile_mask.size
-                    # if true_percentage < 0.8:
-                    #     continue
-                    # Process the tiles as needed
-                    # For example, you can save the tiles to a new file
-                    # tile_save_path = tile_2048_path / f"{image_id}_tile_{x}_{y}.png"
-                    # img_tile.write_to_file(tile_save_path)
+    #                 mask_tile = mask.crop(
+    #                                 x, y, min(tile_size, width - x), min(tile_size, height - y)
+    #                             ).numpy()
 
-                    # tile_mask_save_path = (
-                    #     tile_2048_mask_path / f"{image_id}_tile_{x}_{y}.png"
-                    # )
+    #                 # mask_tile_tumor_mask =
 
-                    # mask_tile.write_to_file(tile_mask_save_path)
-            # pass
-            # img_path = data_dir / "train_images" / f"{row.image_id}.png"
-            # img = vips_read_image(str(img_path), longest_edge=5000)
-            # cv2.imwrite(str(target_path / f"{row.image_id}.png"), img)
-        else:
-            pass
-            # img_path = data_dir / "train_images" / f"{row.image_id}.png"
-            # img = cv2.imread(str(img_path))
-            # cv2.imwrite(str(target_path / f"{row.image_id}.png"), img)
+    #                 tile_save_path = tile_2048_path / f"{image_id}_tile_{x}_{y}.png"
+    #                 Image.fromarray(img_tile).resize(new_size, Image.LANCZOS).save(
+    #                     tile_save_path
+    #                 )
 
-        # break
+    #                 mask_tile_save_path = tile_2048_mask_path / f"{image_id}_tile_{x}_{y}.png"
+
+    #                 Image.fromarray(mask_tile).resize(new_size, Image.LANCZOS).save(
+    #                     mask_tile_save_path
+    #                 )
+    #     else:
+    #         pass
+
+    # break
