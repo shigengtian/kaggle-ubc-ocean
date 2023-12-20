@@ -65,9 +65,9 @@ class CFG:
     # size of the image
     img_size = 512
 
-    batch_size = 8
+    batch_size = 16
     # batch_size and epochs
-    epochs = 30
+    epochs = 10
     num_workers = 8 
 
     lr = 1e-4
@@ -89,7 +89,7 @@ class CFG:
 class UBCDataset(Dataset):
     def __init__(self, df, transforms=None):
         self.df = df
-        self.file_names = df["img_path"].values
+        self.file_names = df["tile_path"].values
         self.labels = df["label"].values
         self.transforms = transforms
 
@@ -350,16 +350,22 @@ if __name__ == "__main__":
     os.makedirs(output_path, exist_ok=True)
     LOGGER = get_logger(f"{output_path}/train")
 
-    data_dir = Path("dataset")
+    data_dir = Path("dataset") 
+    train_tile_df = pd.read_csv("dataset/train_tile_mask.csv")
+    train_tile_df = train_tile_df[train_tile_df["tumor_ratio"] > 0.1].reset_index(drop=True)
+    train_tile_df["image_id"] = train_tile_df["tile_path"].apply(lambda x: x.split("/")[-1].split(".")[0].split("_")[0])
+    train_tile_df = train_tile_df[train_tile_df["tumor_ratio"] > 0.1].reset_index(drop=True)
+    
     train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": "string"})
-
-    def get_img_path(x):
-        return f"{data_dir}/train_thumbnails_custom/{x}.png"
-
-    train_df["img_path"] = train_df["image_id"].apply(get_img_path)
+    train_df = train_tile_df.merge(train_df, on="image_id", how="left")
     train_df["label"] = train_df["label"].map(CFG.label_dict)
-
-    train_df = split_df(train_df)
+    
+    print(train_df.head())
+    
+    kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)
+    for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_df)):
+        train_df.loc[valid_idx, "fold"] = int(fold)
+        
 
     for fold in CFG.selected_folds:
 
