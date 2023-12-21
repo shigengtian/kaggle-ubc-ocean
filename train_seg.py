@@ -67,7 +67,7 @@ class CFG:
     # batch_size and epochs
     batch_size = 8
     epochs = 10
-    num_workers = 20
+    num_workers = 12
 
     lr = 1e-4
     weight_decay = 1e-6
@@ -361,6 +361,7 @@ if __name__ == "__main__":
     print(train_df.head())
     
     for fold in CFG.selected_folds:
+        if fold == 0: continue
         LOGGER.info(f"Fold: {fold}")
         train_loop(train_df, fold)
         break
