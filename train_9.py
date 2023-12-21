@@ -68,7 +68,7 @@ class CFG:
     batch_size = 16
     # batch_size and epochs
     epochs = 10
-    num_workers = 8 
+    num_workers = 8
 
     lr = 1e-4
     weight_decay = 1e-6
@@ -350,25 +350,32 @@ if __name__ == "__main__":
     os.makedirs(output_path, exist_ok=True)
     LOGGER = get_logger(f"{output_path}/train")
 
-    data_dir = Path("dataset") 
+    data_dir = Path("dataset")
     train_tile_df = pd.read_csv("dataset/train_tile_mask.csv")
-    train_tile_df = train_tile_df[train_tile_df["tumor_ratio"] > 0.1].reset_index(drop=True)
-    train_tile_df["image_id"] = train_tile_df["tile_path"].apply(lambda x: x.split("/")[-1].split(".")[0].split("_")[0])
-    train_tile_df = train_tile_df[train_tile_df["tumor_ratio"] > 0.1].reset_index(drop=True)
-    
+    train_tile_df = train_tile_df[train_tile_df["tumor_ratio"] > 0.1].reset_index(
+        drop=True
+    )
+    train_tile_df["image_id"] = train_tile_df["tile_path"].apply(
+        lambda x: x.split("/")[-1].split(".")[0].split("_")[0]
+    )
+    train_tile_df = train_tile_df[train_tile_df["tumor_ratio"] > 0.1].reset_index(
+        drop=True
+    )
+
     train_df = pd.read_csv(data_dir / "train.csv", dtype={"image_id": "string"})
     train_df = train_tile_df.merge(train_df, on="image_id", how="left")
     train_df["label"] = train_df["label"].map(CFG.label_dict)
-    
+
     print(train_df.head())
-    
+
     kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)
     for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_df)):
         train_df.loc[valid_idx, "fold"] = int(fold)
-        
 
-    for fold in CFG.selected_folds:
+    print(train_df.head())
+    print(train_df["label"].value_counts())
+    # for fold in CFG.selected_folds:
 
-        LOGGER.info(f"Fold: {fold}")
-        train_loop(train_df, fold)
-        # break
+    #     LOGGER.info(f"Fold: {fold}")
+    #     train_loop(train_df, fold)
+    #     # break
