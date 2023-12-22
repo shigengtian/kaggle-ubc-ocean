@@ -65,7 +65,7 @@ class CFG:
     img_size = 512
 
     # batch_size and epochs
-    batch_size = 8
+    batch_size = 32
     epochs = 30
     num_workers = 20
 
@@ -85,146 +85,100 @@ class CFG:
     num_classes = len(target_cols)
 
 
-class CustomDataset(Dataset):
+class UBCDataset(Dataset):
     def __init__(self, df, transforms=None):
+        self.img_paths = df["tile_path"].values
         self.transforms = transforms
-        self.img_path = df["train_thumbnails_file_paths"].values
-        self.mask_path = df["segmentation_nps_file_paths"].values
-
+        
     def __len__(self):
-        return len(self.img_path)
-
+        return len(self.img_paths)
+    
     def __getitem__(self, index):
-        image = cv2.imread(str(self.img_path[index]))
-        mask = np.load(str(self.mask_path[index])) / 255.0
-        mask = mask[:, :, np.newaxis]
-
+        
+        img_path = self.img_paths[index]
+        img = cv2.imread(str(img_path))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    
         if self.transforms:
-            augmented = self.transforms(image=image, mask=mask)
-            image = augmented["image"]
-            mask = augmented["mask"]
-
-        image = np.transpose(image, (2, 0, 1))
-        image = image / 255.0
-        mask = np.transpose(mask, (2, 0, 1))
-        return torch.tensor(image).float(), torch.tensor(mask).float()
+            img = self.transforms(image=img)["image"]
+            
+        return {"image": img,}
 
 
 def get_transforms():
     return A.Compose(
         [
             A.Resize(CFG.img_size, CFG.img_size),
-            # A.Normalize(
-            #     mean=[0.485, 0.456, 0.406],
-            #     std=[0.229, 0.224, 0.225],
-            #     max_pixel_value=255.0,
-            #     p=1.0,
-            # ),
-            # ToTensorV2(),
+            A.Normalize(
+                mean=[0.485, 0.456, 0.406],
+                std=[0.229, 0.224, 0.225],
+                max_pixel_value=255.0,
+                p=1.0,
+            ),
+            ToTensorV2(),
         ],
-        p=1.0,
-    )
+        p=1.0,)
+    
+    
 
 
-def train_loop(folds, fold):
-    LOGGER.info(f"========== fold: {fold} training ==========")
+if __name__ == "__main__":
+    seed_everything()
+    # output_path = f"{CFG.exp_name}"
+    # os.makedirs(output_path, exist_ok=True)
+    # LOGGER = get_logger(f"{output_path}/train")
 
-    valid_folds = folds[folds["fold"] == fold].reset_index(drop=True)
+    data_dir = Path("dataset")
+    train_tiles = sorted(glob(str(data_dir / "train_tiles" / "*.png")))
+    tile_df = pd.DataFrame(train_tiles, columns=["tile_path"])
 
-    valid_dataset = CustomDataset(valid_folds, transforms=get_transforms())
-
-    valid_loader = DataLoader(
-        valid_dataset,
-        batch_size=CFG.batch_size,
-        shuffle=False,
-        num_workers=CFG.num_workers,
-        pin_memory=True,
-        drop_last=False,
-    )
-
+    print(tile_df.head())
+    # tile_df = tile_df[:10] 
     model = smp.Unet(
         encoder_name=CFG.model_name,
-        encoder_weights="imagenet",
+        encoder_weights=None,
         in_channels=3,
         classes=1,
         activation=None,
     )
 
     model.to(device)
-    model.load_state_dict(torch.load(f"{output_path}/fold-{fold}.pth"))
-    print("weights loaded")
-
-    for index, (images, label) in enumerate(valid_loader):
-        images = images.to(device)
-        label = label.to(device)
+    model.eval()
+    model.load_state_dict(torch.load(f"exp-seg/seg-fold-0.pth"))
+    model.to(device)
+    
+    
+    test_dataset = UBCDataset(tile_df, transforms=get_transforms())
+    test_dataset_loader = DataLoader(
+        test_dataset,
+        batch_size=CFG.batch_size,
+        shuffle=False,
+        num_workers=CFG.num_workers,
+        pin_memory=True,
+        drop_last=False,
+    )
+    
+    bar = tqdm(total=len(test_dataset_loader))
+    bar.set_description(f"Inferencing")
+    
+    mask_ratio = []
+    for index, data in enumerate(test_dataset_loader):
+        images = data["image"].to(device)
+        batch_size = images.size(0)
         with torch.no_grad():
             outputs = model(images)
-
+            
         probs = torch.sigmoid(outputs)
         probs = probs.detach().cpu().numpy()
 
-        print(probs.shape)
-        threshold = 0.5  # You can adjust this threshold based on your task
+        threshold = 0.33
         binary_masks = (probs > threshold).astype(int)
-        cv2.imwrite("pred.png", binary_masks[1][0] * 255)
-
-        label = label.detach().cpu().numpy()
-        cv2.imwrite("label.png", label[1][0] * 255)
-
-        break
-
-
-if __name__ == "__main__":
-    seed_everything()
-    output_path = f"{CFG.exp_name}"
-    os.makedirs(output_path, exist_ok=True)
-    LOGGER = get_logger(f"{output_path}/train")
-
-    data_dir = Path("dataset")
-    thumbnails_dir = Path(data_dir / "train_thumbnails")
-    train_images = sorted(glob(str(thumbnails_dir / "*.png")))
-    train_thumbnails_dir = data_dir / "train_thumbnails"
-
-    segmentation_nps = sorted(glob(str(data_dir / "masks_np" / "*.npy")))
-
-    segmentation_nps_df = pd.DataFrame(
-        segmentation_nps, columns=["segmentation_nps_file_paths"]
-    )
-
-    segmentation_nps_df["image_id"] = segmentation_nps_df[
-        "segmentation_nps_file_paths"
-    ].apply(lambda x: str(x).split("/")[-1].split(".")[0])
-
-    print("segmentation_nps_df")
-    print(segmentation_nps_df.head())
-
-    train_thumbnails_files = list(train_thumbnails_dir.glob("*.png"))
-    print(f"train_thumbnails_files: {len(train_thumbnails_files)}")
-
-    train_thumbnails_files_df = pd.DataFrame(
-        train_thumbnails_files, columns=["train_thumbnails_file_paths"]
-    )
-
-    train_thumbnails_files_df["image_id"] = train_thumbnails_files_df[
-        "train_thumbnails_file_paths"
-    ].apply(lambda x: str(x).split("/")[-1].split("_")[0])
-
-    print("train_thumbnails_files_df")
-    print(train_thumbnails_files_df.head())
-
-    train_seg = segmentation_nps_df.merge(
-        train_thumbnails_files_df, on="image_id", how="left"
-    )
-
-    print(train_seg.head())
-
-    kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)
-    for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_seg)):
-        train_seg.loc[valid_idx, "fold"] = int(fold)
-
-    print(train_seg.head())
-
-    for fold in CFG.selected_folds:
-        LOGGER.info(f"Fold: {fold}")
-        train_loop(train_seg, fold)
-        break
+        for _index in range(batch_size):
+            true_pixel_ratio = np.count_nonzero(binary_masks[_index]) /(512*512)
+            mask_ratio.append(true_pixel_ratio)
+        bar.update()
+        
+    print("mask ratio")
+    print(mask_ratio)
+    tile_df["mask_ratio"] = mask_ratio
+    tile_df.to_csv("dataset/tile_df.csv", index=False)

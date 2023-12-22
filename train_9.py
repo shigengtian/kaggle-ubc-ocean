@@ -49,7 +49,7 @@ class CFG:
     competition = "ubc-ocean"
     _wandb_kernel = "shigengtian/ubc-ocean"
 
-    exp_name = "exp-08"
+    exp_name = "exp-09"
 
     model_name = "tf_efficientnetv2_s_in21ft1k"
 
