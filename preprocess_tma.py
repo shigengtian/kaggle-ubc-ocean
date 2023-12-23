@@ -16,7 +16,7 @@ if __name__ == "__main__":
     train_df = train_df[train_df["is_tma"] == True]
     print(train_df)
 
-    tile_size = (1024, 1024)  # Specify the size of each tile
+    tile_size = (1536, 1536)  # Specify the size of each tile
     overlap = 50  # Specify the overlap between tiles
     for index, row in train_df.iterrows():
         img_id = row["image_id"]

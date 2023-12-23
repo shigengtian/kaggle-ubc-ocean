@@ -90,7 +90,7 @@ def process_image(row, data_dir, tile_2048_path, tile_2048_mask_path):
                     x, y, min(tile_size, width - x), min(tile_size, height - y)
                 ).numpy()
 
-                gray = cv2.cvtColor(img_tile, cv2.COLOR_BGR2GRAY)
+                gray = cv2.cvtColor(img_tile, cv2.COLOR_RGB2GRAY)
                 _, binary_image = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
 
                 # black area ratio threshold start from here
@@ -102,7 +102,7 @@ def process_image(row, data_dir, tile_2048_path, tile_2048_mask_path):
 
                 # black_area_ratio = black_pixels / total_pixels
 
-                if black_area_ratio > 0.3:
+                if black_area_ratio > 0.2:
                     print(f"black_area_ratio: {black_area_ratio}")
                     continue
                 # black area ratio threshold end here
@@ -157,11 +157,11 @@ if __name__ == "__main__":
     new_size = (512, 512)
 
     tile_2048_path = data_dir / "train_tiles_2048"
-    shutil.rmtree(str(tile_2048_path))
+    shutil.rmtree(str(tile_2048_path), ignore_errors=True)
     tile_2048_path.mkdir(exist_ok=True)
 
     tile_2048_mask_path = data_dir / "train_tiles_2048_mask"
-    shutil.rmtree(str(tile_2048_mask_path))
+    shutil.rmtree(str(tile_2048_mask_path), ignore_errors=True)
     tile_2048_mask_path.mkdir(exist_ok=True)
 
     num_processes = 12

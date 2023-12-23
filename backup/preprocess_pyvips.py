@@ -76,9 +76,6 @@ if __name__ == "__main__":
 
     print(train_df)
 
-    # white_thr = 240
-    # drop_thr = 0.8
-
     tile_size = 2048
     for index, row in train_df.iterrows():
         print(row)
@@ -123,70 +120,4 @@ if __name__ == "__main__":
                 tile = img.crop(left, top, tile_width, tile_height)
                 tile_mask = mask.crop(left, top, tile_width, tile_height)
 
-        #             pil_image = Image.fromarray(tile.numpy())
-        #             pil_image.save("test.png", format="png")
-        #             break
-
-        # black_bg = np.sum(tile, axis=2) == 0
-        # tile[black_bg, :] = 255
-        # mask_bg = np.mean(tile, axis=2) > white_thr
-
-        # if np.sum(mask_bg) >= (np.prod(mask_bg.shape) * drop_thr):
-        #     print(f"skip almost empty tile")
-        #     # print(f"skip almost empty tile: {k:06}_{int(x_ / w)}-{int(y_ / h)}")
-        #     continue
-
-        # if tile.shape[:2] != (h, w):
-        #         tile_ = tile
-        #         tile_size = (h, w) if tile.ndim == 2 else (h, w, tile.shape[2])
-        #         tile = np.zeros(tile_size, dtype=tile.dtype)
-        #         tile[:tile_.shape[0], :tile_.shape[1], ...] = tile_
-
-        # files = []
-        # for y, y_, x, x_ in idxs:
-        #     # https://libvips.github.io/pyvips/vimage.html#pyvips.Image.crop
-        #     tile = im.crop(x, y, min(w, im.width - x), min(h, im.height - y)).numpy()[..., :3]
-        #     if tile.shape[:2] != (h, w):
-        #         tile_ = tile
-        #         tile_size = (h, w) if tile.ndim == 2 else (h, w, tile.shape[2])
-        #         tile = np.zeros(tile_size, dtype=tile.dtype)
-        #         tile[:tile_.shape[0], :tile_.shape[1], ...] = tile_
-
-        #     black_bg = np.sum(tile, axis=2) == 0
-        #     tile[black_bg, :] = 255
-        #     mask_bg = np.mean(tile, axis=2) > white_thr
-
-        #     if np.sum(mask_bg) >= (np.prod(mask_bg.shape) * drop_thr):
-        #         #print(f"skip almost empty tile: {k:06}_{int(x_ / w)}-{int(y_ / h)}")
-        #         continue
-        # target_path = data_dir / "tile_2048" / f"{row.image_id}"
-        # p_img = os.path.join(folder, f"{int(x_ / w)}-{int(y_ / h)}.png")
-        # # print(tile.shape, tile.dtype, tile.min(), tile.max())
-        # new_size = int(size * scale), int(size * scale)
-        # Image.fromarray(tile).resize(new_size, Image.LANCZOS).save(p_img)
-        # files.append(p_img)
-        # need to set counter check as some empty tiles could be skipped earlier
-        # if len(files) >= max_samples:
-        #     break
-
         break
-
-    # target_path = data_dir / "train_thumbnails_custom"
-    # target_path.mkdir(exist_ok=True)
-
-    # num_processes = 12
-    # Parallel(n_jobs=num_processes, backend="multiprocessing")(
-    #     delayed(process_image)(row, data_dir, target_path)
-    #     for _, row in tqdm(train_df.iterrows(), total=len(train_df))
-    # )
-
-    # for index, row in tqdm(train_df.iterrows(), total=len(train_df)):
-    #     tma = row["is_tma"]
-    #     if ~tma:
-    #         img_path = data_dir / "train_images" / f"{row.image_id}.png"
-    #         img = vips_read_image(str(img_path), longest_edge=5000)
-    #         cv2.imwrite(str(target_path / f"{row.image_id}.png"), img)
-    #     else:
-    #         img_path = data_dir / "train_images" / f"{row.image_id}.png"
-    #         img = cv2.imread(str(img_path))
-    #         cv2.imwrite(str(target_path / f"{row.image_id}.png"), img)
