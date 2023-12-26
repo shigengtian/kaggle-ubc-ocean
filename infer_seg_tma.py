@@ -102,6 +102,7 @@ class UBCDataset(Dataset):
             img = self.transforms(image=img)["image"]
 
         return {
+            "image_path": img_path,
             "image": img,
         }
 
@@ -129,11 +130,11 @@ if __name__ == "__main__":
     # LOGGER = get_logger(f"{output_path}/train")
 
     data_dir = Path("dataset")
-    train_tiles = sorted(glob(str(data_dir / "train_tiles_full_2048" / "*.png")))
+    train_tiles = sorted(glob(str(data_dir / "tile_tma" / "*.png")))
     tile_df = pd.DataFrame(train_tiles, columns=["tile_path"])
-
+    predict_dir = Path("dataset/predict_tma_mask")
+    os.makedirs(predict_dir, exist_ok=True)
     print(tile_df.head())
-    # tile_df = tile_df[:10]
     model = smp.Unet(
         encoder_name=CFG.model_name,
         encoder_weights=None,
@@ -163,6 +164,7 @@ if __name__ == "__main__":
     mask_ratio = []
     for index, data in enumerate(test_dataset_loader):
         images = data["image"].to(device)
+        img_paths = data["image_path"]
         batch_size = images.size(0)
         with torch.no_grad():
             outputs = model(images)
@@ -172,12 +174,16 @@ if __name__ == "__main__":
 
         threshold = 0.33
         binary_masks = (probs > threshold).astype(int)
+        print(binary_masks.shape)
         for _index in range(batch_size):
-            true_pixel_ratio = np.count_nonzero(binary_masks[_index]) / (512 * 512)
-            mask_ratio.append(true_pixel_ratio)
-        bar.update()
+            img_path = img_paths[_index]
+            img_file_name = img_path.split("/")[-1]
+            target_mask_path = predict_dir / img_file_name
+            # print(target_mask_path)
+            # print(binary_masks[_index].shape)
 
-    print("mask ratio")
-    print(mask_ratio)
-    tile_df["mask_ratio"] = mask_ratio
-    tile_df.to_csv("dataset/tile_df.csv", index=False)
+            cv2.imwrite(str(target_mask_path), binary_masks[_index][0] * 255)
+
+            # break
+        # break
+        bar.update()

@@ -41,7 +41,7 @@ def process_image(row, data_dir, tile_path):
                     x, y, min(tile_size, width - x), min(tile_size, height - y)
                 ).numpy()
 
-                gray = cv2.cvtColor(img_tile, cv2.COLOR_BGR2GRAY)
+                gray = cv2.cvtColor(img_tile, cv2.COLOR_RGB2GRAY)
                 _, binary_image = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
 
                 # black area ratio threshold start from here
@@ -55,11 +55,11 @@ def process_image(row, data_dir, tile_path):
 
                 tile_save_path = tile_path / f"{image_id}_tile_{x}_{y}.png"
 
-                Image.fromarray(img_tile).save(tile_save_path)
+                Image.fromarray(img_tile).resize(new_size).save(tile_save_path)
 
 
 if __name__ == "__main__":
-    tile_size = 1024
+    tile_size = 2048
     white_thr = 240
     drop_thr = 0.6
     new_size = (512, 512)
@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
     print(train_df.head())
 
-    tile_path = data_dir / f"train_tiles_{tile_size}"
+    tile_path = data_dir / f"train_tiles_full_{tile_size}"
     shutil.rmtree(str(tile_path), ignore_errors=True)
     tile_path.mkdir(exist_ok=True)
 
