@@ -102,8 +102,8 @@ def process_image(row, data_dir, tile_2048_path, tile_2048_mask_path):
 
                 # black_area_ratio = black_pixels / total_pixels
 
-                if black_area_ratio > 0.2:
-                    print(f"black_area_ratio: {black_area_ratio}")
+                if black_area_ratio > 0.3:
+                    # print(f"black_area_ratio: {black_area_ratio}")
                     continue
                 # black area ratio threshold end here
 
