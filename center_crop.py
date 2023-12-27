@@ -57,6 +57,4 @@ if __name__ == "__main__":
 
     for index, row in tm_train_df.iterrows():
         center_crop(row.image_id)
-        # print(row)
-        # break
-    # print(tm_train_df.head())
+

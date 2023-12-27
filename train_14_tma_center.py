@@ -49,7 +49,7 @@ class CFG:
     competition = "ubc-ocean"
     _wandb_kernel = "shigengtian/ubc-ocean"
 
-    exp_name = "exp-14"
+    exp_name = "exp-14-tma-center-crop"
 
     model_name = "tf_efficientnetv2_s_in21ft1k"
 
@@ -132,14 +132,14 @@ def get_transforms(data):
                     ],
                     p=0.4,
                 ),
-                # A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
-                # A.CoarseDropout(
-                #     max_holes=1,
-                #     max_width=int(512 * 0.3),
-                #     max_height=int(512 * 0.3),
-                #     mask_fill_value=0,
-                #     p=0.5,
-                # ),
+                A.GridDistortion(num_steps=5, distort_limit=0.3, p=0.5),
+                A.CoarseDropout(
+                    max_holes=1,
+                    max_width=int(512 * 0.3),
+                    max_height=int(512 * 0.3),
+                    mask_fill_value=0,
+                    p=0.5,
+                ),
                 A.Normalize(
                     mean=[0.485, 0.456, 0.406],
                     std=[0.229, 0.224, 0.225],
@@ -308,7 +308,8 @@ def train_loop(folds, fold):
 
     model = UBCModel(CFG.model_name, CFG.num_classes, pretrained=True)
     model.to(device)
-    model.load_state_dict(torch.load("exp-09/exp-09-fold-0.pth"))
+    model.load_state_dict(torch.load("exp-13/exp-13-fold-0.pth"))
+    print("load model")
 
     optimizer = AdamW(model.parameters(),
                       lr=CFG.lr,
@@ -337,7 +338,7 @@ def train_loop(folds, fold):
             LOGGER.info(f"Epoch {epoch + 1} | Best Valid acc: {best_acc:.4f}")
             torch.save(
                 model.state_dict(),
-                f"{output_path}/{CFG.exp_name}-tma-center-crop-fold-{fold}.pth"
+                f"{output_path}/{CFG.exp_name}-fold-{fold}.pth"
             )
 
     LOGGER.info(f"best acc: {best_acc:.4f}")
@@ -372,16 +373,13 @@ if __name__ == "__main__":
     train_df = tma_tiles_df.merge(train_df, on='image_id', how='left')
     print(train_df.head())
 
-     kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)
-     for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_df)):
-         train_df.loc[valid_idx, "fold"] = int(fold)
-     print(train_df.head())
-#    train_df = split_df(train_df)
-#    print(train_df.head())
+    kfold = KFold(n_splits=CFG.folds, shuffle=True, random_state=CFG.seed)
+    for fold, (train_idx, valid_idx) in enumerate(kfold.split(train_df)):
+        train_df.loc[valid_idx, "fold"] = int(fold)
+    print(train_df.head())
+
 #
-#    train_df = tma_tiles_df.merge(train_df, on="image_id", how="left")
-#
-#    for fold in CFG.selected_folds:
-#        LOGGER.info(f"Fold: {fold}")
-#        train_loop(train_df, fold)
-# break
+    for fold in CFG.selected_folds:
+        LOGGER.info(f"Fold: {fold}")
+        train_loop(train_df, fold)
+        # break
