@@ -170,7 +170,7 @@ if __name__ == "__main__":
         probs = torch.sigmoid(outputs)
         probs = probs.detach().cpu().numpy()
 
-        threshold = 0.33
+        threshold = 0.5
         binary_masks = (probs > threshold).astype(int)
         for _index in range(batch_size):
             true_pixel_ratio = np.count_nonzero(binary_masks[_index]) / (512 * 512)
